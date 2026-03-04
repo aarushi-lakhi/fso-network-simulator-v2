@@ -85,40 +85,74 @@ fso-network-simulator/
 
 | Branch | Purpose |
 |--------|---------|
-| `main` | Stable, demo-ready code only. Never commit directly. Merge via PR. |
-| `dev` | Integration branch. Features merge here first; `main` gets periodic stable cuts. |
+| `main` | Stable, demo-ready code only. **Never commit directly.** Merge via PR only. |
+| `dev` | Integration branch. All features merge here first. `main` gets a cut when a phase is fully working. |
 
-### Feature Branches
+### Branch Naming Convention
 
-One branch per phase/feature. Branch from `dev`, merge back to `dev` via PR.
+Format: **`<type>/<short-kebab-description>`**
+
+Branch names describe *what the code does*, not when you're doing it (no phase numbers — the plan can change, branch names live forever in `git log`).
+
+| Type | When to use |
+|------|------------|
+| `feat/` | New functionality |
+| `fix/` | Bug fix on existing code |
+| `chore/` | Tooling, build system, environment setup |
+| `docs/` | Documentation only |
+| `test/` | Tests with no production code changes |
+| `refactor/` | Code restructure, no behavior change |
+| `experiment/` | Exploratory / proof-of-concept (may never merge) |
+
+### Planned Branches for This Project
 
 ```
-dev
-├── feature/phase1-env-setup
-├── feature/phase2-python-prototype
-├── feature/phase2-gnuradio-block
-├── feature/phase3-ns3-fso-channel
-├── feature/phase4-ns3-ai-interface
-├── feature/phase4-ppo-agent
-└── feature/phase5-benchmarks
+main
+└── dev
+    ├── chore/dev-environment          # Phase 1: WSL2, GNU Radio, ns-3 install scripts + verification
+    ├── feat/gamma-gamma-sampler       # Phase 2a: Python prototype — Gamma-Gamma RNG, BER curves
+    ├── feat/gr-fso-fading-block       # Phase 2b: GNU Radio OOT module (depends on gamma-gamma-sampler)
+    ├── feat/ns3-fso-propagation-model # Phase 3: custom PropagationLossModel in C++
+    ├── feat/ns3-ai-gym-interface      # Phase 4a: ns3-ai shared memory bridge
+    ├── feat/ppo-routing-agent         # Phase 4b: PyTorch PPO agent (can prototype in parallel with 4a)
+    └── feat/benchmark-suite           # Phase 5: comparison scripts + plots
 ```
 
-**Naming convention:** `feature/<phase>-<short-description>` (lowercase, hyphens only)
+> **Parallel agent rule:** branches that touch different directories are safe to run simultaneously.
+> e.g., `feat/gr-fso-fading-block` (only `gr-fso-turbulence/`) and
+> `feat/ns3-fso-propagation-model` (only `ns3-fso-channel/`) never conflict.
 
-**Branch lifecycle:**
-```
-# Start a new feature
+### Branch Lifecycle
+
+```bash
+# 1. Always branch from dev (make sure it's up to date first)
 git checkout dev
 git pull origin dev
-git checkout -b feature/phase2-python-prototype
+git checkout -b feat/gamma-gamma-sampler
 
-# ... do work, commit often ...
+# 2. Commit often with meaningful messages (see Commit Messages section)
+git add prototype/gamma_gamma.py
+git commit -m "feat(gamma-gamma): implement Gamma-Gamma RNG via product-of-Gammas method"
 
-# When ready to merge
-git push origin feature/phase2-python-prototype
-# Open PR: feature/... → dev
-# Squash-merge or rebase-merge (no merge commits on dev)
+# 3. Keep your branch current with dev to avoid big merge conflicts later
+git fetch origin
+git rebase origin/dev        # preferred over merge — keeps history linear
+
+# 4. When ready: push, open PR → dev, get review (even self-review — read the diff!)
+git push origin feat/gamma-gamma-sampler
+# PR title should match branch: "feat: gamma-gamma sampler"
+# Merge strategy: squash-merge (clean history on dev) or rebase-merge (preserve commits)
+# NEVER merge directly — always open a PR so there's a review record
+
+# 5. After merge, delete the remote branch (GitHub does this automatically if configured)
+git branch -d feat/gamma-gamma-sampler
 ```
+
+### Push Policy
+
+> ⚠️ **Always review and test locally before pushing anything.**
+> No force-pushes to `dev` or `main`. Ever.
+> If a commit needs fixing after push, open a new `fix/` branch — don't rewrite history on shared branches.
 
 ### Parallel Agent Workflow
 
@@ -277,13 +311,13 @@ Thumbs.db
 
 | Phase | Branch | Status | Notes |
 |-------|--------|--------|-------|
-| 1 — Environment Setup | `feature/phase1-env-setup` | 🔲 Not started | WSL2 + Ubuntu 22.04 + GNU Radio 3.10 + ns-3.40 |
-| 2a — Python Prototype | `feature/phase2-python-prototype` | 🔲 Not started | Start here — no WSL2 needed |
-| 2b — GNU Radio Block | `feature/phase2-gnuradio-block` | 🔲 Not started | Depends on Phase 1 + 2a |
-| 3 — ns-3 FSO Channel | `feature/phase3-ns3-fso-channel` | 🔲 Not started | Depends on Phase 1 + 2a (for params) |
-| 4a — ns3-ai Interface | `feature/phase4-ns3-ai-interface` | 🔲 Not started | Depends on Phase 3 |
-| 4b — PPO Agent | `feature/phase4-ppo-agent` | 🔲 Not started | Can prototype in parallel with 4a |
-| 5 — Benchmarks | `feature/phase5-benchmarks` | 🔲 Not started | Depends on Phase 4 |
+| 1 — Environment Setup | `chore/dev-environment` | 🔲 Not started | WSL2 + Ubuntu 22.04 + GNU Radio 3.10 + ns-3.40 |
+| 2a — Python Prototype | `feat/gamma-gamma-sampler` | 🔲 Not started | **Start here** — no WSL2 needed, pure Python |
+| 2b — GNU Radio Block | `feat/gr-fso-fading-block` | 🔲 Not started | Depends on Phase 1 + 2a |
+| 3 — ns-3 FSO Channel | `feat/ns3-fso-propagation-model` | 🔲 Not started | Depends on Phase 1 + 2a (for params) |
+| 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | 🔲 Not started | Depends on Phase 3 |
+| 4b — PPO Agent | `feat/ppo-routing-agent` | 🔲 Not started | Can prototype in parallel with 4a |
+| 5 — Benchmarks | `feat/benchmark-suite` | 🔲 Not started | Depends on Phase 4 |
 
 **Status legend:** 🔲 Not started · 🔄 In progress · ✅ Complete · ⏸ Blocked
 
