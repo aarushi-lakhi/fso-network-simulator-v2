@@ -1,0 +1,52 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# ── C++ / CMake ───────────────────────────────────────────────────────────────
+*.o
+*.so
+*.a
+*.out
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+
+# ── ns-3 ──────────────────────────────────────────────────────────────────────
+ns-3-dev/build/
+ns-3-dev/.lock-ns3_*
+
+# ── GNU Radio ─────────────────────────────────────────────────────────────────
+gr-*/build/
+
+# ── Simulation outputs (large — generate locally, don't commit) ───────────────
+*.pcap
+*.tr
+*.xml
+results/*.csv
+results/*.dat
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
