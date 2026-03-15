@@ -4,7 +4,7 @@
 > seamless continuity when picking up this project on a new machine or in a new session.
 > Read this alongside `plan.md`, which has the full technical plan and phase tracker.
 >
-> Last updated: 2026-07-01
+> Last updated: 2026-07-03
 
 ---
 
@@ -25,27 +25,20 @@ and academic — it needs to be both technically rigorous and visually impressiv
 ```
 origin/main      ← stable; two commits (init + branch naming fix)
 origin/dev       ← integration branch; mirrors main
-feat/gamma-gamma-sampler  ← LOCAL ONLY, not yet pushed to origin
+origin/feat/gamma-gamma-sampler  ← pushed; checked out locally on the new machine
 ```
 
-**Commits on `feat/gamma-gamma-sampler` (ahead of dev by 2):**
+**Commits on `feat/gamma-gamma-sampler` (ahead of dev by 3):**
 ```
+a7621fa  docs: add agent handoff document for laptop migration
 eaa0728  test(gamma-gamma): full pytest suite with SI identity validation
 42ebc00  feat(gamma-gamma): implement Gamma-Gamma atmospheric turbulence model
 f2e0b79  docs(plan): update branch naming to industry-standard convention   ← on main/dev
 78db0b7  chore: initialize repo with plan and gitignore                     ← on main/dev
 ```
 
-**Action needed on new machine:**
-```bash
-git clone https://github.com/aarushi-lakhi/fso-network-simulator.git
-cd fso-network-simulator
-
-# The feature branch is local-only on the old laptop — it needs to be pushed first,
-# OR the user can cherry-pick / re-push after cloning.
-# If the user pushed before switching: git checkout feat/gamma-gamma-sampler
-# If not yet pushed: the two commits above need to be recreated or pushed from the old machine.
-```
+**Laptop migration is complete.** The branch was pushed from the old machine and the repo
+now lives at `~/fso-network-simulator-v2` on the new laptop (macOS, Apple Silicon).
 
 ---
 
@@ -59,7 +52,7 @@ All files live in `prototype/`.
 |------|---------|
 | `prototype/gamma_gamma.py` | Core math — Gamma-Gamma model, BER analysis |
 | `prototype/turbulence_plots.py` | Three publication-quality plots |
-| `prototype/tests/test_gamma_gamma.py` | 30 pytest tests |
+| `prototype/tests/test_gamma_gamma.py` | 39 pytest tests |
 | `prototype/requirements.txt` | numpy, scipy, matplotlib, pytest, pytest-cov |
 | `prototype/tests/__init__.py` | Makes tests/ a package |
 
@@ -91,7 +84,7 @@ within 5% on 500k samples. If this test passes, the Gamma-Gamma math is correct.
 
 ```bash
 cd prototype/
-python3 -m venv .venv && source .venv/bin/activate   # Linux/WSL2
+python3 -m venv .venv && source .venv/bin/activate   # macOS / Linux
 pip install -r requirements.txt
 
 # Tests
@@ -105,21 +98,25 @@ python turbulence_plots.py
 
 ## Next Steps (in order)
 
-1. **Push `feat/gamma-gamma-sampler`** — from old machine before switching, or recreate from
-   the two commits above:
-   ```bash
-   git push origin feat/gamma-gamma-sampler
-   ```
+1. ~~**Push `feat/gamma-gamma-sampler`**~~ — ✅ done; branch is on origin.
 
-2. **Run the test suite** on the new machine in WSL2 — confirm all 30 tests pass.
+2. ~~**Run the test suite**~~ — ✅ done 2026-07-03 on macOS: 39 passed, 99% coverage.
+   Two tests had physically incorrect assertions (fixed on the branch): the strong-regime
+   Rytov spot-check expected σ²_R > 5 where the correct closed-form value at 1 km is ≈ 1.99
+   (strong regime starts at σ²_R > 1), and the AWGN BER test expected ~0.5 at 0 dB where
+   ½·erfc(√½) ≈ 0.1587 is correct (BER → 0.5 only as SNR → −∞). The production math in
+   `gamma_gamma.py` was verified correct by hand — only test expectations changed.
 
-3. **Run `turbulence_plots.py`** — review the three plots visually to confirm the fading
-   traces, BER curves, and scintillation map look physically correct.
+3. ~~**Run `turbulence_plots.py`**~~ — ✅ done 2026-07-03: all three plots reviewed and
+   physically sensible (heavy-tailed strong-turbulence fades, fading-induced BER slope
+   flattening, SI saturation near ~1.2).
 
 4. **Open PR: `feat/gamma-gamma-sampler` → `dev`** — user reviews the diff, squash-merge.
 
-5. **Start Phase 1 (`chore/dev-environment`)** — WSL2 + GNU Radio 3.10 + ns-3.40 setup.
-   This can be worked on in parallel with step 3/4.
+5. **Start Phase 1 (`chore/dev-environment`)** — macOS setup: GNU Radio 3.10 (Homebrew or
+   conda) + ns-3.40 (builds natively with CMake/clang). Verify ns3-ai's shared-memory
+   interface works on macOS early — it is primarily tested on Linux; fallback is a Docker
+   or Lima Ubuntu 22.04 environment. This can be worked on in parallel with step 3/4.
 
 6. **Start Phase 2b (`feat/gr-fso-fading-block`)** — GNU Radio OOT block; depends on
    Phase 1 environment being set up and Phase 2a being merged.
@@ -138,7 +135,8 @@ python turbulence_plots.py
   does, not when.
 
 - **Commit message style:** Conventional Commits — `<type>(<scope>): <description>`.
-  Always add `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` trailer.
+  **Do NOT add `Co-Authored-By` trailers** (policy changed 2026-07-03; earlier commits
+  carry the trailer, new ones must not).
 
 - **Two agents in parallel:** Safe when working in different directories. The plan defines
   which branches touch which directories — check before running concurrent agents.
@@ -219,9 +217,14 @@ f(I; α, β) = [2(αβ)^((α+β)/2)] / [Γ(α)Γ(β)] × I^((α+β)/2 - 1) × K_
 
 ## Environment Notes
 
-- Development environment: **WSL2 (Ubuntu 22.04) is required** for GNU Radio and ns-3.
-  The Python prototype (`prototype/`) runs on native Windows Python too.
-- Target: **GNU Radio 3.10** (ships with Ubuntu 22.04 apt — no version pinning needed).
-- Target: **ns-3.40** (pin with `git checkout ns-3.40` after cloning).
-- User is on **Windows 11** (moving from a Dell Latitude 5330 to a new laptop).
+- Development environment: **macOS (Apple Silicon / arm64)** — the user's new laptop is a Mac,
+  replacing the old Windows 11 + WSL2 setup. All WSL2-specific instructions are obsolete.
+- The Python prototype (`prototype/`) runs on native macOS Python (Homebrew Python 3).
+- Target: **GNU Radio 3.10** — install via Homebrew (`brew install gnuradio`) or conda
+  (`conda install -c conda-forge gnuradio`).
+- Target: **ns-3.40** (pin with `git checkout ns-3.40` after cloning) — builds natively on
+  macOS with CMake + clang.
+- **Risk to verify early in Phase 1:** ns3-ai's shared-memory bridge is primarily developed
+  and tested on Linux. If it misbehaves on macOS, fall back to a Docker or Lima Ubuntu 22.04
+  environment for Phases 4–5.
 - GitHub remote: `https://github.com/aarushi-lakhi/fso-network-simulator.git`
