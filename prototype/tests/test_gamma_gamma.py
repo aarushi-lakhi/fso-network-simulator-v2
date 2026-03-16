@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.special import erfc
 
 from gamma_gamma import (
     C2N_MODERATE,
@@ -122,9 +123,14 @@ class TestRytovVariance:
         assert sigma2_R < 0.3, f"Expected weak turbulence (σ²_R < 0.3), got {sigma2_R:.4f}"
 
     def test_known_value_strong_regime(self) -> None:
-        """Spot-check: σ²_R for strong turbulence at 1 km should be >> 1."""
+        """Spot-check: σ²_R for strong turbulence at 1 km is in the strong regime.
+
+        Strong fluctuations begin at σ²_R > 1 (Andrews & Phillips, 2005).
+        For C²_n = 10⁻¹³, λ = 1550 nm, L = 1 km the closed form gives σ²_R ≈ 1.99.
+        """
         sigma2_R = rytov_variance(C2N_STRONG, 1550e-9, 1000.0)
-        assert sigma2_R > 5.0, f"Expected strong turbulence (σ²_R > 5), got {sigma2_R:.4f}"
+        assert sigma2_R > 1.0, f"Expected strong regime (σ²_R > 1), got {sigma2_R:.4f}"
+        assert abs(sigma2_R - 1.991) < 0.01, f"Regression: expected σ²_R ≈ 1.991, got {sigma2_R:.4f}"
 
     def test_nonnegative(self) -> None:
         sigma2_R = rytov_variance(C2N_MODERATE, 1550e-9, 1000.0)
@@ -297,10 +303,16 @@ class TestScintillationIndex:
 class TestBerAwgnBaseline:
     """AWGN BER should match the closed-form erfc formula."""
 
-    def test_ber_at_zero_snr_near_half(self) -> None:
-        """At SNR = 0 dB, BER should be close to 0.5 (random guessing)."""
+    def test_ber_at_zero_snr_known_value(self) -> None:
+        """At SNR = 0 dB (linear SNR = 1), BER = ½·erfc(√½) ≈ 0.1587 exactly."""
         ber = ber_awgn_baseline(np.array([0.0]))
-        assert abs(float(ber[0]) - 0.5) < 0.1
+        expected = 0.5 * erfc(np.sqrt(0.5))
+        assert abs(float(ber[0]) - expected) < 1e-12
+
+    def test_ber_approaches_half_at_very_low_snr(self) -> None:
+        """BER → 0.5 (random guessing) only as SNR → −∞, e.g. at −30 dB."""
+        ber = ber_awgn_baseline(np.array([-30.0]))
+        assert abs(float(ber[0]) - 0.5) < 0.02
 
     def test_ber_decreases_with_snr(self) -> None:
         snr_db = np.array([0.0, 5.0, 10.0, 15.0, 20.0])
