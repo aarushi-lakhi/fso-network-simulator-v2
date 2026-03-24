@@ -17,9 +17,10 @@ check() {
 }
 
 NS3_PYTHON="$(brew --prefix python@3.11 2>/dev/null)/bin/python3.11"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 check "python3 >= 3.10"      python3 -c 'import sys; assert sys.version_info >= (3, 10)'
-check "numpy/scipy/matplotlib" python3 -c 'import numpy, scipy, matplotlib'
+check "prototype venv deps"  "$REPO_ROOT/prototype/.venv/bin/python" -c 'import numpy, scipy, matplotlib'
 check "GNU Radio 3.10"       python3 -c 'from gnuradio import gr; assert gr.version().startswith("3.10")'
 check "cmake"                cmake --version
 check "ninja"                ninja --version
