@@ -314,8 +314,8 @@ Thumbs.db
 
 | Phase | Branch | Status | Notes |
 |-------|--------|--------|-------|
-| 1 — Environment Setup | `chore/dev-environment` | 🔲 Not started | macOS: GNU Radio 3.10 (Homebrew/conda) + ns-3.40 (native CMake/clang); verify ns3-ai shared memory works on macOS early |
-| 2a — Python Prototype | `feat/gamma-gamma-sampler` | 🔄 In progress | Code + 39 tests + plots done, verified on macOS (2026-07-03); PR → `dev` pending |
+| 1 — Environment Setup | `chore/dev-environment` | 🔄 In progress | macOS: GNU Radio 3.10 (Homebrew) + ns-3.40 (native CMake/clang); verify ns3-ai shared memory works on macOS early |
+| 2a — Python Prototype | `feat/gamma-gamma-sampler` | ✅ Complete | Merged to `dev` via PR #1 (2026-07-03); 39 tests, 99% coverage |
 | 2b — GNU Radio Block | `feat/gr-fso-fading-block` | 🔲 Not started | Depends on Phase 1 + 2a |
 | 3 — ns-3 FSO Channel | `feat/ns3-fso-propagation-model` | 🔲 Not started | Depends on Phase 1 + 2a (for params) |
 | 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | 🔲 Not started | Depends on Phase 3 |
