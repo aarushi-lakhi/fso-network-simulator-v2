@@ -10,6 +10,12 @@ NS3_VERSION="ns-3.40"
 command -v brew >/dev/null || { echo "Homebrew required: https://brew.sh"; exit 1; }
 brew list cmake &>/dev/null || brew install cmake
 brew list ninja &>/dev/null || brew install ninja
+brew list python@3.11 &>/dev/null || brew install python@3.11
+
+# ns-3.40's ./ns3 wrapper breaks on Python >= 3.14 (argparse change), and
+# ns3-ai's Python bindings want <= 3.11, so the whole ns-3 toolchain is
+# pinned to 3.11.
+NS3_PYTHON="$(brew --prefix python@3.11)/bin/python3.11"
 
 mkdir -p "$FSO_TOOLS_DIR"
 if [ ! -d "$NS3_DIR" ]; then
@@ -17,8 +23,9 @@ if [ ! -d "$NS3_DIR" ]; then
 fi
 
 cd "$NS3_DIR"
-./ns3 configure --build-profile=optimized --enable-examples --enable-tests
-./ns3 build
+"$NS3_PYTHON" ./ns3 configure --build-profile=optimized --enable-examples --enable-tests \
+    -- -DPython_EXECUTABLE="$NS3_PYTHON" -DPython3_EXECUTABLE="$NS3_PYTHON"
+"$NS3_PYTHON" ./ns3 build
 
-./ns3 run hello-simulator
+"$NS3_PYTHON" ./ns3 run hello-simulator
 echo "OK: $NS3_VERSION built at $NS3_DIR"
