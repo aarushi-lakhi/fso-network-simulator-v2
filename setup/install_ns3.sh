@@ -22,6 +22,13 @@ if [ ! -d "$NS3_DIR" ]; then
     git clone --branch "$NS3_VERSION" --depth 1 https://gitlab.com/nsnam/ns-3-dev.git "$NS3_DIR"
 fi
 
+# ns-3.40's custom pair operator== is ambiguous under newer libc++ (fixed
+# upstream after 3.41); backport by deleting it. Idempotent.
+PATCH="$(cd "$(dirname "$0")" && pwd)/patches/ns3-3.40-libcxx-pair-eq.patch"
+if git -C "$NS3_DIR" apply --check "$PATCH" 2>/dev/null; then
+    git -C "$NS3_DIR" apply "$PATCH"
+fi
+
 cd "$NS3_DIR"
 "$NS3_PYTHON" ./ns3 configure --build-profile=optimized --enable-examples --enable-tests \
     -- -DPython_EXECUTABLE="$NS3_PYTHON" -DPython3_EXECUTABLE="$NS3_PYTHON"
