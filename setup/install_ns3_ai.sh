@@ -27,7 +27,9 @@ sed -i '' 's|^add_subdirectory(multi-bss)|# add_subdirectory(multi-bss)  # requi
 cd "$NS3_DIR"
 "$NS3_PYTHON" ./ns3 configure --build-profile=optimized --enable-examples --enable-tests \
     -- -DPython_EXECUTABLE="$NS3_PYTHON" -DPython3_EXECUTABLE="$NS3_PYTHON"
-"$NS3_PYTHON" ./ns3 build ai
+# First build can race ahead of protobuf codegen (missing dep edge in
+# ns3-ai's CMake); the retry picks up the generated headers.
+"$NS3_PYTHON" ./ns3 build ai || "$NS3_PYTHON" ./ns3 build ai
 
 VENV_DIR="$FSO_TOOLS_DIR/ns3ai-venv"
 [ -d "$VENV_DIR" ] || "$NS3_PYTHON" -m venv "$VENV_DIR"
