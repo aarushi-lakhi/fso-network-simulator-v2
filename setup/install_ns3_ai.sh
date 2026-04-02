@@ -37,5 +37,5 @@ VENV_DIR="$FSO_TOOLS_DIR/ns3ai-venv"
 "$VENV_DIR/bin/pip" install -q -e "$NS3_DIR/contrib/ai/model/gym-interface/py"
 
 echo "OK: ns3-ai module built, python packages in $VENV_DIR"
-echo "Run a shared-memory example (contrib/ai/examples) to confirm it works"
-echo "end-to-end on macOS before relying on it for Phase 4."
+echo "Run examples with the venv ACTIVATED (source $VENV_DIR/bin/activate) —"
+echo "ns3ai_utils launches ./ns3 via 'env python3', which must resolve to 3.11."
