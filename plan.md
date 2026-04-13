@@ -316,10 +316,10 @@ Thumbs.db
 |-------|--------|--------|-------|
 | 1 — Environment Setup | `chore/dev-environment` | ✅ Complete | Installed + verified on macOS 2026-07-03 (`setup/verify_env.sh` 11/11); ns3-ai shared memory confirmed working natively on Apple Silicon |
 | 2a — Python Prototype | `feat/gamma-gamma-sampler` | ✅ Complete | Merged to `dev` via PR #1 (2026-07-03); 39 tests, 99% coverage |
-| 2b — GNU Radio Block | `feat/gr-fso-fading-block` | 🔲 Not started | Depends on Phase 1 + 2a |
-| 3 — ns-3 FSO Channel | `feat/ns3-fso-propagation-model` | 🔲 Not started | Depends on Phase 1 + 2a (for params) |
-| 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | 🔲 Not started | Depends on Phase 3 |
-| 4b — PPO Agent | `feat/ppo-routing-agent` | 🔲 Not started | Can prototype in parallel with 4a |
+| 2b — GNU Radio Block | `feat/gr-fso-fading-block` | ✅ Complete | Merged to `dev` via PR #3 (2026-07-03); 6 QA tests green |
+| 3 — ns-3 FSO Channel | `feat/ns3-fso-propagation-model` | ✅ Complete | Merged to `dev` via PR #4 (2026-07-03); test suite green, 5-node mesh demo works |
+| 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | 🔄 In progress | Started 2026-07-03; Gym env over the Phase 3 FSO mesh |
+| 4b — PPO Agent | `feat/ppo-routing-agent` | 🔄 In progress | Started 2026-07-03 in parallel with 4a; integration branch follows both |
 | 5 — Benchmarks | `feat/benchmark-suite` | 🔲 Not started | Depends on Phase 4 |
 
 **Status legend:** 🔲 Not started · 🔄 In progress · ✅ Complete · ⏸ Blocked
