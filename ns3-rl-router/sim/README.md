@@ -72,5 +72,7 @@ Prints the spaces, the reset observation and one transition per random
 action, then exits with the ns-3 subprocess cleaned up.
 
 Note for Python consumers: `ns3ai_gym_env` uses the `np.float`/`np.int`
-aliases removed in NumPy ≥ 1.24 — shim them before importing it (see the
-top of `check_env.py`).
+aliases removed in NumPy ≥ 1.24, and its editable install does not expose
+its top-level `messages_pb2`/`ns3ai_gym_msg_py` modules. Importing
+`ns3ai_shim.py` (from this directory) applies both fixes; `check_env.py`
+and `agent/ns3_env.py` use it.

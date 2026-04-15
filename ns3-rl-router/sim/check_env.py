@@ -20,74 +20,15 @@ import os
 import sys
 import traceback
 
+import gymnasium as gym
 import numpy as np
 
-# ns3ai_gym_env still uses the np.float/np.int aliases removed in NumPy 1.24;
-# restore them before the import.
-np.float = float  # type: ignore[attr-defined]
-np.int = int  # type: ignore[attr-defined]
-np.uint = np.uint64  # type: ignore[attr-defined]
+# Applies the numpy-alias and sys.path shims ns3ai_gym_env needs (on import)
+from ns3ai_shim import DEFAULT_NS3_PATH, add_gym_msg_path, load_flat_yaml, ns3_settings
 
-import gymnasium as gym
-
-DEFAULT_NS3_PATH = os.path.expanduser(
-    os.path.join(os.environ.get("FSO_TOOLS_DIR", "~/fso-tools"), "ns-3-dev")
-)
 DEFAULT_CONFIG = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "config", "sim_config.yaml"
 )
-
-
-def load_flat_yaml(path: str) -> dict[str, str]:
-    """Parse a flat ``key: value`` YAML file without a yaml dependency.
-
-    Args:
-        path: Path to the YAML file. Only top-level scalar keys are
-            supported (which is all sim_config.yaml contains).
-
-    Returns:
-        Mapping of key to raw string value, comments stripped.
-    """
-    config: dict[str, str] = {}
-    with open(path, encoding="utf-8") as fp:
-        for line in fp:
-            line = line.split("#", 1)[0].strip()
-            if not line or ":" not in line:
-                continue
-            key, value = line.split(":", 1)
-            config[key.strip()] = value.strip()
-    return config
-
-
-def ns3_settings(config: dict[str, str], seed: int) -> dict[str, str]:
-    """Map sim_config.yaml keys onto fso-rl-env command-line arguments.
-
-    Args:
-        config: Flat config mapping from :func:`load_flat_yaml`.
-        seed: Simulation run number.
-
-    Returns:
-        Settings dict passed to the ns-3 process as ``--key=value`` pairs.
-    """
-    return {
-        "c2n": config["c2n"],
-        "episodeSteps": config["episode_steps"],
-        "stepTime": config["step_time_s"],
-        "updateIntervalMs": config["update_interval_ms"],
-        "txPowerDbm": config["tx_power_dbm"],
-        "noiseDbm": config["noise_dbm"],
-        "wavelength": config["wavelength_m"],
-        "extinction": config["extinction_coeff_per_m"],
-        "meshRadius": config["mesh_radius_m"],
-        "dataRate": config["data_rate"],
-        "trafficRate": config["traffic_rate"],
-        "packetSize": config["packet_size_bytes"],
-        "dropWeight": config["reward_drop_weight"],
-        "delayWeight": config["reward_delay_weight"],
-        "flapPenalty": config["reward_flap_penalty"],
-        "energyWeight": config["reward_energy_weight"],
-        "simSeed": str(seed),
-    }
 
 
 def main() -> int:
@@ -106,10 +47,7 @@ def main() -> int:
                              "turbulence")
     args = parser.parse_args()
 
-    # ns3ai_gym_env's editable install does not expose its top-level
-    # messages_pb2 / ns3ai_gym_msg_py modules; import them from the source dir.
-    sys.path.append(os.path.join(args.ns3_path, "contrib", "ai",
-                                 "model", "gym-interface", "py"))
+    add_gym_msg_path(args.ns3_path)
     import ns3ai_gym_env  # noqa: F401  (registers ns3ai_gym_env/Ns3-v0)
 
     config = load_flat_yaml(os.path.abspath(args.config))
