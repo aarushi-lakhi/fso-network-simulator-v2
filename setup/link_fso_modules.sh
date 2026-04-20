@@ -22,7 +22,10 @@ reconfigure() {
 if [ "${1:-}" = "--unlink" ]; then
     rm -f "$NS3_DIR/contrib/fso-channel" "$NS3_DIR/scratch/fso-rl-env"
     reconfigure
-    "$NS3_PYTHON" ./ns3 build
+    # Build the ai module like install_ns3_ai.sh does; a full './ns3 build'
+    # would trip over ns3-ai's bundled rate-control example, which needs a
+    # newer wifi API than ns-3.40 ships.
+    "$NS3_PYTHON" ./ns3 build ai
     echo "OK: symlinks removed, tree restored to contrib = ai only"
     exit 0
 fi
