@@ -88,6 +88,11 @@ fso-network-simulator/
 | `main` | Stable, demo-ready code only. **Never commit directly.** Merge via PR only. |
 | `dev` | Integration branch. All features merge here first. `main` gets a cut when a phase is fully working. |
 
+> ⚠️ **Cutting `main`:** never open the release PR with `dev` itself as the head branch —
+> GitHub's auto-delete-head-branches setting deletes the PR head on merge, which nuked
+> `dev` after PR #12 (restored from `main`). Instead branch `release/<name>` off `dev`
+> and PR that into `main`.
+
 ### Branch Naming Convention
 
 Format: **`<type>/<short-kebab-description>`**
