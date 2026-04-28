@@ -60,7 +60,14 @@ class Node;
  *
  * and installs the PER on the receiving device's RateErrorModel
  * (ERROR_UNIT_PACKET). The result is block fading: the channel state is held
- * for UpdateInterval (~turbulence coherence time), then redrawn.
+ * for UpdateInterval, then redrawn.
+ *
+ * With the loss model's coherence times at zero (default) successive blocks
+ * are i.i.d., as before. With a positive CoherenceTimeLargeScale or
+ * CoherenceTimeSmallScale on the loss model, each direction's irradiance
+ * evolves as an independent temporally correlated Gamma-Gamma process (one
+ * CorrelatedGammaGammaFading instance per direction); the coherence times
+ * are latched from the loss model in Setup().
  *
  * Instances are created by FsoTopologyHelper, one per FSO link.
  */
@@ -99,7 +106,8 @@ class FsoLinkFadingModel : public Object
     /**
      * \brief Assign fixed stream numbers to the underlying random variables.
      *
-     * Covers the loss model's fading RNG and both error model variates.
+     * Covers the loss model's fading RNGs, both error model variates, and
+     * the two per-direction correlated fading processes.
      *
      * \param stream first stream index to use
      * \return the number of stream indices assigned
@@ -133,6 +141,9 @@ class FsoLinkFadingModel : public Object
     Ptr<MobilityModel> m_mobilityB;          //!< Endpoint B position
     Ptr<RateErrorModel> m_errorModelAtB;     //!< PER sink for A->B
     Ptr<RateErrorModel> m_errorModelAtA;     //!< PER sink for B->A
+    Ptr<CorrelatedGammaGammaFading> m_fadingAtoB; //!< Correlated process A->B
+    Ptr<CorrelatedGammaGammaFading> m_fadingBtoA; //!< Correlated process B->A
+    bool m_correlated{false};                //!< Whether correlated fading is on
     EventId m_updateEvent;                   //!< Pending update event
 };
 
