@@ -92,6 +92,20 @@ FsoLinkFadingModel::Setup(Ptr<GammaGammaFsoLossModel> lossModel,
     m_mobilityB = mobilityB;
     m_errorModelAtB = errorModelAtB;
     m_errorModelAtA = errorModelAtA;
+
+    // One independent correlated process per direction, latching the loss
+    // model's coherence times. With both times zero the processes stay idle
+    // and Update() keeps the historical i.i.d. draws from the loss model.
+    Time tauLarge = lossModel->GetCoherenceTimeLargeScale();
+    Time tauSmall = lossModel->GetCoherenceTimeSmallScale();
+    m_correlated = tauLarge.IsStrictlyPositive() || tauSmall.IsStrictlyPositive();
+    m_fadingAtoB = CreateObject<CorrelatedGammaGammaFading>();
+    m_fadingBtoA = CreateObject<CorrelatedGammaGammaFading>();
+    for (auto fading : {m_fadingAtoB, m_fadingBtoA})
+    {
+        fading->SetAttribute("CoherenceTimeLargeScale", TimeValue(tauLarge));
+        fading->SetAttribute("CoherenceTimeSmallScale", TimeValue(tauSmall));
+    }
 }
 
 void
@@ -108,6 +122,8 @@ FsoLinkFadingModel::AssignStreams(int64_t stream)
     currentStream += m_lossModel->AssignStreams(currentStream);
     currentStream += m_errorModelAtB->AssignStreams(currentStream);
     currentStream += m_errorModelAtA->AssignStreams(currentStream);
+    currentStream += m_fadingAtoB->AssignStreams(currentStream);
+    currentStream += m_fadingBtoA->AssignStreams(currentStream);
     return currentStream - stream;
 }
 
@@ -120,6 +136,8 @@ FsoLinkFadingModel::DoDispose()
     m_mobilityB = nullptr;
     m_errorModelAtB = nullptr;
     m_errorModelAtA = nullptr;
+    m_fadingAtoB = nullptr;
+    m_fadingBtoA = nullptr;
     Object::DoDispose();
 }
 
@@ -139,8 +157,21 @@ FsoLinkFadingModel::Update()
     double snr = std::pow(10.0, (meanRxDbm - m_noiseDbm) / 10.0);
 
     // Independent fading realisation per direction
-    double perAtoB = CalcPer(snr, m_lossModel->GetFadingSample(distance));
-    double perBtoA = CalcPer(snr, m_lossModel->GetFadingSample(distance));
+    double irradianceAtoB;
+    double irradianceBtoA;
+    if (m_correlated && m_lossModel->IsTurbulenceEnabled())
+    {
+        auto [alpha, beta] = m_lossModel->GetAlphaBeta(distance);
+        irradianceAtoB = m_fadingAtoB->GetSample(alpha, beta);
+        irradianceBtoA = m_fadingBtoA->GetSample(alpha, beta);
+    }
+    else
+    {
+        irradianceAtoB = m_lossModel->GetFadingSample(distance);
+        irradianceBtoA = m_lossModel->GetFadingSample(distance);
+    }
+    double perAtoB = CalcPer(snr, irradianceAtoB);
+    double perBtoA = CalcPer(snr, irradianceBtoA);
     m_errorModelAtB->SetRate(perAtoB);
     m_errorModelAtA->SetRate(perBtoA);
 
