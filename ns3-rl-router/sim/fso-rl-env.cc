@@ -410,6 +410,8 @@ main(int argc, char* argv[])
     uint32_t episodeSteps = 100;
     double stepTime = 0.1;
     double updateIntervalMs = 1.0;
+    Time coherenceLarge = Seconds(0);
+    Time coherenceSmall = Seconds(0);
     double txPowerDbm = 10.0;
     double noiseDbm = -8.0;
     double wavelength = 1550e-9;
@@ -429,6 +431,12 @@ main(int argc, char* argv[])
     cmd.AddValue("episodeSteps", "Decision steps per episode", episodeSteps);
     cmd.AddValue("stepTime", "Agent decision interval [s]", stepTime);
     cmd.AddValue("updateIntervalMs", "Fading refresh period [ms]", updateIntervalMs);
+    cmd.AddValue("coherenceLarge",
+                 "Large-scale fading coherence time, e.g. 100ms (0 = i.i.d.)",
+                 coherenceLarge);
+    cmd.AddValue("coherenceSmall",
+                 "Small-scale fading coherence time, e.g. 10ms (0 = i.i.d.)",
+                 coherenceSmall);
     cmd.AddValue("txPowerDbm", "Transmit optical power [dBm]", txPowerDbm);
     cmd.AddValue("noiseDbm", "Receiver noise-equivalent power [dBm]", noiseDbm);
     cmd.AddValue("wavelength", "Optical wavelength [m]", wavelength);
@@ -476,6 +484,8 @@ main(int argc, char* argv[])
     fso.SetLossModelAttribute("C2n", DoubleValue(c2n));
     fso.SetLossModelAttribute("Wavelength", DoubleValue(wavelength));
     fso.SetLossModelAttribute("ExtinctionCoefficient", DoubleValue(extinction));
+    fso.SetLossModelAttribute("CoherenceTimeLargeScale", TimeValue(coherenceLarge));
+    fso.SetLossModelAttribute("CoherenceTimeSmallScale", TimeValue(coherenceSmall));
     fso.SetLinkAttribute("TxPowerDbm", DoubleValue(txPowerDbm));
     fso.SetLinkAttribute("NoiseDbm", DoubleValue(noiseDbm));
     fso.SetLinkAttribute("UpdateInterval", TimeValue(MilliSeconds(updateIntervalMs)));
