@@ -110,6 +110,16 @@ def main() -> None:
                         help="ns-3 run number of the first episode")
     parser.add_argument("--c2n", type=str, default=None,
                         help="C2n override [m^-2/3], e.g. 1e-13")
+    parser.add_argument("--coherence-large", type=str, default=None,
+                        help="large-scale fading coherence time, e.g. 500ms "
+                             "(0ms = i.i.d.)")
+    parser.add_argument("--coherence-small", type=str, default=None,
+                        help="small-scale fading coherence time, e.g. 100ms "
+                             "(0ms = i.i.d.)")
+    parser.add_argument("--step-time", type=str, default=None,
+                        help="decision interval [s], e.g. 0.05")
+    parser.add_argument("--episode-steps", type=int, default=None,
+                        help="decision steps per episode")
     parser.add_argument("--sim-config", type=str, default=DEFAULT_CONFIG_PATH,
                         help="path to sim_config.yaml")
     parser.add_argument("--checkpoint", type=str, default=None,
@@ -119,7 +129,11 @@ def main() -> None:
     checkpoint = Path(args.checkpoint).resolve() if args.checkpoint else None
     sim_config = str(Path(args.sim_config).resolve())
 
-    env = make_ns3_env(sim_config, c2n=args.c2n, seed=args.seed)
+    env = make_ns3_env(sim_config, c2n=args.c2n, seed=args.seed,
+                       coherence_large=args.coherence_large,
+                       coherence_small=args.coherence_small,
+                       step_time_s=args.step_time,
+                       episode_steps=args.episode_steps)
     agent = None
     if checkpoint is not None:
         obs_dim = int(np.prod(env.observation_space.shape))
