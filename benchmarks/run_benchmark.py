@@ -82,6 +82,12 @@ TRAIN_STEPS: dict[str, int] = {"weak": 20_000, "moderate": 40_000, "strong": 80_
 POLICIES = ("ppo", "ppo-transfer", "static-0", "static-1", "static-2", "static-3",
             "random", "aodv")
 
+# ppo-per is the Phase 6 iteration variant: PPO trained after the env's
+# drop-rate observation was replaced by the per-link PER (the correlated
+# channel state, visible for off-route links too). The first-pass "ppo"
+# rows of the correlated study predate that observation change.
+ALL_POLICIES = ("ppo", "ppo-per", *POLICIES[1:])
+
 
 @dataclass(frozen=True)
 class CoherenceConfig:
@@ -116,13 +122,17 @@ COHERENCE_CONFIGS: dict[str, CoherenceConfig] = {
     "iid": CoherenceConfig("0ms", "0ms"),
     "tau100-20": CoherenceConfig("100ms", "20ms", "0.05", "200"),
     "tau500-100": CoherenceConfig("500ms", "100ms"),
+    # Iteration cell: same channel as tau500-100 but 50 ms decision steps
+    # (PER-state lag-1 autocorr 0.60 vs 0.42 across steps) so the agent
+    # can react within a fade epoch; 200 steps keep the 10 s episode.
+    "tau500-100-step50": CoherenceConfig("500ms", "100ms", "0.05", "200"),
 }
 
 CORRELATED_C2N = "1e-13"
 CORRELATED_TRAIN_STEPS = 80_000
 
 # ppo-transfer is a Phase 5 cross-regime datapoint; it adds nothing here.
-CORRELATED_POLICIES = tuple(p for p in POLICIES if p != "ppo-transfer")
+CORRELATED_POLICIES = tuple(p for p in ALL_POLICIES if p != "ppo-transfer")
 
 CSV_FIELDS = ("regime", "c2n", "policy", "episode", "sim_seed", "reward",
               "drops", "tx_pkts", "rx_pkts", "pdr", "mean_delay_ms")
@@ -286,8 +296,8 @@ def _action_fn_for(policy: str, env, seed: int) -> Callable[[np.ndarray], int]:
     if policy == "ppo-transfer":
         return _load_agent(PHASE4_CHECKPOINT, obs_dim, n_actions).act_greedy
     if policy.startswith("ppo"):
-        regime = policy.split(":", 1)[1]
-        checkpoint = CHECKPOINTS_DIR / f"ppo_{regime}.pt"
+        variant, regime = policy.split(":", 1)
+        checkpoint = CHECKPOINTS_DIR / f"{variant.replace('-', '_')}_{regime}.pt"
         return _load_agent(checkpoint, obs_dim, n_actions).act_greedy
     if policy.startswith("static-"):
         route = int(policy.split("-", 1)[1])
@@ -321,7 +331,9 @@ def eval_worker(args: argparse.Namespace) -> None:
                        episode_steps=args.episode_steps)
     try:
         for policy in policies:
-            worker_policy = f"ppo:{regime}" if policy == "ppo" else policy
+            worker_policy = policy
+            if policy != "ppo-transfer" and policy.startswith("ppo"):
+                worker_policy = f"{policy}:{regime}"
             action_fn = _action_fn_for(worker_policy, env, args.seed)
             for ep in range(args.episodes):
                 metrics = run_env_episode(env, args.seed + ep, action_fn)
@@ -488,7 +500,7 @@ def merge_rows(existing: list[dict], new_rows: list[EpisodeRow]) -> list[dict]:
     combined = kept + [{k: str(v) for k, v in asdict(row).items()} for row in new_rows]
     regime_order = {name: i
                     for i, name in enumerate([*REGIMES, *COHERENCE_CONFIGS])}
-    policy_order = {name: i for i, name in enumerate(POLICIES)}
+    policy_order = {name: i for i, name in enumerate(ALL_POLICIES)}
     combined.sort(key=lambda r: (regime_order.get(r["regime"], 99),
                                  policy_order.get(r["policy"], 99),
                                  int(r["episode"])))
@@ -528,7 +540,7 @@ def parse_args() -> argparse.Namespace:
                         choices=sorted(COHERENCE_CONFIGS),
                         help="restrict --study correlated to this coherence "
                              "config (repeatable; default all)")
-    parser.add_argument("--policy", action="append", choices=POLICIES,
+    parser.add_argument("--policy", action="append", choices=ALL_POLICIES,
                         help="restrict to this policy (repeatable; default all)")
     parser.add_argument("--episodes", type=int, default=10,
                         help="evaluation episodes per policy per regime")
@@ -601,15 +613,18 @@ def main() -> None:
             f", tau {coherence.coherence_large}/{coherence.coherence_small}")
         print(f"\n=== {regime} (C2n={c2n}{detail}) ===", flush=True)
 
-        if "ppo" in policies:
-            checkpoint = CHECKPOINTS_DIR / f"ppo_{regime}.pt"
+        for variant in [p for p in policies
+                        if p.startswith("ppo") and p != "ppo-transfer"]:
+            checkpoint = (CHECKPOINTS_DIR /
+                          f"{variant.replace('-', '_')}_{regime}.pt")
             if args.retrain or not checkpoint.exists():
                 start = time.monotonic()
                 train_regime_policy(regime, c2n, train_steps[regime],
                                     checkpoint, args.train_seed, coherence)
                 elapsed = time.monotonic() - start
-                timings.append((regime, "ppo-train", elapsed))
-                print(f"[{regime}] training done in {elapsed:.0f}s", flush=True)
+                timings.append((regime, f"{variant}-train", elapsed))
+                print(f"[{regime}] {variant} training done in {elapsed:.0f}s",
+                      flush=True)
             else:
                 print(f"[{regime}] reusing checkpoint {checkpoint}")
 
