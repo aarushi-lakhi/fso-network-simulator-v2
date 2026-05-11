@@ -130,7 +130,7 @@ def format_table(summary: list[dict], policies: tuple[str, ...] = HEADLINE_POLIC
     Returns:
         Multi-line table string.
     """
-    header = (f"{'regime':10s} {'policy':14s} {'n':>3s} "
+    header = (f"{'regime':10s} {'policy':22s} {'n':>3s} "
               f"{'reward':>19s} {'PDR':>15s} {'delay [ms]':>15s} {'PHY drops':>17s}")
     lines = [header, "-" * len(header)]
     for entry in summary:
@@ -140,7 +140,7 @@ def format_table(summary: list[dict], policies: tuple[str, ...] = HEADLINE_POLIC
         if entry["detail"]:
             name = f"{name} ({entry['detail']})"
         lines.append(
-            f"{entry['regime']:10s} {name:14s} {entry['n_episodes']:3d} "
+            f"{entry['regime']:10s} {name:22s} {entry['n_episodes']:3d} "
             f"{entry['reward_mean']:10.1f} +/- {entry['reward_std']:5.1f} "
             f"{entry['pdr_mean']:7.3f} +/- {entry['pdr_std']:5.3f} "
             f"{entry['mean_delay_ms_mean']:7.3f} +/- {entry['mean_delay_ms_std']:5.3f} "
