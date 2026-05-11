@@ -48,6 +48,7 @@ COHERENCE_LABELS = {
 POLICY_COLORS = {
     "ppo": "#0072B2",
     "ppo-per": "#D55E00",
+    "ppo-per-ent": "#F0E442",
     "ppo-transfer": "#56B4E9",
     "best-static": "#009E73",
     "random": "#E69F00",
@@ -57,6 +58,7 @@ POLICY_COLORS = {
 POLICY_LABELS = {
     "ppo": "PPO (per-regime)",
     "ppo-per": "PPO (PER observation)",
+    "ppo-per-ent": "PPO (PER obs, 160k, ent 0.03)",
     "ppo-transfer": "PPO (1e-13 ckpt)",
     "best-static": "Best static route",
     "random": "Random",
