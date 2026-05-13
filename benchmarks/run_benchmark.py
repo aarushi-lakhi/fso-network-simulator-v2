@@ -1,7 +1,17 @@
-"""Phase 5 benchmark orchestrator: PPO vs classical routing baselines.
+"""Benchmark orchestrator: PPO vs classical routing baselines.
 
-Runs the full comparison study over the three turbulence regimes
-(C2n weak 1e-17, moderate 1e-15, strong 1e-13) on the 5-node FSO mesh:
+Two studies share this orchestrator:
+
+* ``--study turbulence`` (Phase 5, default) sweeps the three turbulence
+  regimes (C2n weak 1e-17, moderate 1e-15, strong 1e-13) with i.i.d.
+  block fading; results go to results/raw_results.csv.
+* ``--study correlated`` (Phase 6) fixes strong turbulence (C2n 1e-13)
+  and sweeps fading coherence times (COHERENCE_CONFIGS) to test whether
+  PPO can exploit channel memory; results go to
+  results/correlated_raw.csv with the coherence config name in the
+  ``regime`` column.
+
+Policies compared per sweep point on the 5-node FSO mesh:
 
 * ``ppo``          — PPO trained fresh per regime (checkpoint cached under
                      results/checkpoints/, reused unless --retrain).
@@ -14,7 +24,7 @@ Runs the full comparison study over the three turbulence regimes
 
 All policies are evaluated on the same fixed ns-3 run numbers
 (seed, seed+1, ...) so they face identical fading realisations. Raw
-per-episode rows are written to results/raw_results.csv; rows for
+per-episode rows are written to the study's raw CSV; rows for
 (regime, policy) pairs re-run later replace the old ones in place.
 
 Process model: ns3-ai's shared-memory interface is once-per-process (the
@@ -27,9 +37,11 @@ Prerequisites: modules linked and built (setup/link_fso_modules.sh) and
 the agent venv active (`env python3` must resolve to Python 3.11).
 
 Typical usage:
-    $ python run_benchmark.py                     # full study
+    $ python run_benchmark.py                     # full Phase 5 study
     $ python run_benchmark.py --quick             # 2-episode smoke run
     $ python run_benchmark.py --regime strong --policy aodv
+    $ python run_benchmark.py --study correlated  # full Phase 6 study
+    $ python run_benchmark.py --study correlated --coherence tau500-100
 """
 
 from __future__ import annotations
@@ -54,6 +66,7 @@ for _dir in (str(_AGENT_DIR), str(_SIM_DIR)):
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 RAW_CSV = RESULTS_DIR / "raw_results.csv"
+CORRELATED_RAW_CSV = RESULTS_DIR / "correlated_raw.csv"
 CHECKPOINTS_DIR = RESULTS_DIR / "checkpoints"
 PHASE4_CHECKPOINT = _AGENT_DIR / "checkpoints" / "ns3_ppo.pt"
 DEFAULT_SIM_CONFIG = _REPO_DIR / "ns3-rl-router" / "config" / "sim_config.yaml"
@@ -68,6 +81,73 @@ TRAIN_STEPS: dict[str, int] = {"weak": 20_000, "moderate": 40_000, "strong": 80_
 
 POLICIES = ("ppo", "ppo-transfer", "static-0", "static-1", "static-2", "static-3",
             "random", "aodv")
+
+# Phase 6 iteration variants: ppo-per is PPO trained after the env's
+# drop-rate observation was replaced by the per-link PER (the correlated
+# channel state, visible for off-route links too); the first-pass "ppo"
+# rows of the correlated study predate that observation change.
+# ppo-per-ent additionally trains with entropy_coef 0.03 and a 160k-step
+# budget (trained via the train.py CLI, see results/README.md; this
+# orchestrator only evaluates its checkpoint). greedy-per is a scripted
+# reactive baseline: hold the current route, switch to the route with the
+# lowest summed link PER when it beats the current one by GREEDY_MARGIN.
+ALL_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "greedy-per", *POLICIES[1:])
+
+# Candidate routes as link indices into the observation (install order
+# (0,1) (1,2) (2,3) (3,4) (4,0) (0,2) (1,3); see sim/README.md):
+#   route 0: 0-2-3, route 1: 0-1-3, route 2: 0-4-3, route 3: 0-1-2-3
+ROUTE_LINKS = ((5, 2), (0, 6), (4, 3), (0, 1, 2))
+
+# Hysteresis for greedy-per [summed PER]: at ~12 packets per 0.1 s step a
+# sustained PER-sum improvement of 0.1 repays the flap penalty of 5 in
+# about two steps.
+GREEDY_MARGIN = 0.1
+
+
+@dataclass(frozen=True)
+class CoherenceConfig:
+    """One coherence sweep point of the Phase 6 correlated-fading study.
+
+    Attributes:
+        coherence_large: Large-scale fading coherence time (ns-3 Time
+            string; "0ms" means i.i.d. block fading).
+        coherence_small: Small-scale fading coherence time (same format).
+        step_time_s: Decision interval override [s]; None keeps the
+            sim_config default (0.1 s).
+        episode_steps: Decision steps per episode override; None keeps
+            the sim_config default (100). Scale it with 1/step_time_s so
+            every sweep point simulates the same 10 s episode.
+    """
+
+    coherence_large: str
+    coherence_small: str
+    step_time_s: str | None = None
+    episode_steps: str | None = None
+
+
+# Phase 6 coherence sweep, all at strong turbulence (C2n = CORRELATED_C2N).
+# "iid" is the tau=0 control replicating the Phase 5 strong regime. A probe
+# of the dropRate observation's lag-1 autocorrelation under a held route
+# (3 episodes x 2 links) measured: iid ~0.0; tau 100/20 ms 0.20 at 0.1 s
+# steps but 0.29 at 0.05 s; tau 500/100 ms 0.42 at 0.1 s steps. So the
+# tau100-20 point runs 0.05 s decision steps (200 steps = same 10 s episode)
+# to keep the channel state observable across steps; tau500-100 keeps the
+# Phase 5 step time for direct comparability with the strong regime.
+COHERENCE_CONFIGS: dict[str, CoherenceConfig] = {
+    "iid": CoherenceConfig("0ms", "0ms"),
+    "tau100-20": CoherenceConfig("100ms", "20ms", "0.05", "200"),
+    "tau500-100": CoherenceConfig("500ms", "100ms"),
+    # Iteration cell: same channel as tau500-100 but 50 ms decision steps
+    # (PER-state lag-1 autocorr 0.60 vs 0.42 across steps) so the agent
+    # can react within a fade epoch; 200 steps keep the 10 s episode.
+    "tau500-100-step50": CoherenceConfig("500ms", "100ms", "0.05", "200"),
+}
+
+CORRELATED_C2N = "1e-13"
+CORRELATED_TRAIN_STEPS = 80_000
+
+# ppo-transfer is a Phase 5 cross-regime datapoint; it adds nothing here.
+CORRELATED_POLICIES = tuple(p for p in ALL_POLICIES if p != "ppo-transfer")
 
 CSV_FIELDS = ("regime", "c2n", "policy", "episode", "sim_seed", "reward",
               "drops", "tx_pkts", "rx_pkts", "pdr", "mean_delay_ms")
@@ -231,12 +311,25 @@ def _action_fn_for(policy: str, env, seed: int) -> Callable[[np.ndarray], int]:
     if policy == "ppo-transfer":
         return _load_agent(PHASE4_CHECKPOINT, obs_dim, n_actions).act_greedy
     if policy.startswith("ppo"):
-        regime = policy.split(":", 1)[1]
-        checkpoint = CHECKPOINTS_DIR / f"ppo_{regime}.pt"
+        variant, regime = policy.split(":", 1)
+        checkpoint = CHECKPOINTS_DIR / f"{variant.replace('-', '_')}_{regime}.pt"
         return _load_agent(checkpoint, obs_dim, n_actions).act_greedy
     if policy.startswith("static-"):
         route = int(policy.split("-", 1)[1])
         return lambda _obs: route
+    if policy == "greedy-per":
+        current = 0  # env installs route 0 initially
+
+        def act_greedy_per(obs: np.ndarray) -> int:
+            nonlocal current
+            per = np.asarray(obs, dtype=np.float64).reshape(-1, 4)[:, 1]
+            costs = [float(sum(per[i] for i in links)) for links in ROUTE_LINKS]
+            best = int(np.argmin(costs))
+            if costs[best] < costs[current] - GREEDY_MARGIN:
+                current = best
+            return current
+
+        return act_greedy_per
     if policy == "random":
         rng = np.random.default_rng(seed)
         return lambda _obs: int(rng.integers(n_actions))
@@ -244,24 +337,31 @@ def _action_fn_for(policy: str, env, seed: int) -> Callable[[np.ndarray], int]:
 
 
 def eval_worker(args: argparse.Namespace) -> None:
-    """Evaluate all env-driven policies of one regime in this process.
+    """Evaluate all env-driven policies of one sweep point in this process.
 
     Creates the single allowed gym env, rolls the shared seed set for
     each policy, and prints one ``FSO-ROW <csv>`` line per episode on
     stdout (progress goes to stderr).
 
     Args:
-        args: Parsed CLI namespace (regime, policies, episodes, seed, ...).
+        args: Parsed CLI namespace (regime, policies, episodes, seed,
+            and optional c2n/coherence/step-time env overrides).
     """
     from ns3_env import make_ns3_env
 
     regime = args.regime[0]
-    c2n = REGIMES[regime]
+    c2n = args.c2n or REGIMES[regime]
     policies = args.policy
-    env = make_ns3_env(str(Path(args.sim_config).resolve()), c2n=c2n, seed=args.seed)
+    env = make_ns3_env(str(Path(args.sim_config).resolve()), c2n=c2n, seed=args.seed,
+                       coherence_large=args.coherence_large,
+                       coherence_small=args.coherence_small,
+                       step_time_s=args.step_time,
+                       episode_steps=args.episode_steps)
     try:
         for policy in policies:
-            worker_policy = f"ppo:{regime}" if policy == "ppo" else policy
+            worker_policy = policy
+            if policy != "ppo-transfer" and policy.startswith("ppo"):
+                worker_policy = f"{policy}:{regime}"
             action_fn = _action_fn_for(worker_policy, env, args.seed)
             for ep in range(args.episodes):
                 metrics = run_env_episode(env, args.seed + ep, action_fn)
@@ -281,20 +381,45 @@ def eval_worker(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _coherence_cli_args(coherence: CoherenceConfig | None,
+                        step_flag: str = "--step-time") -> list[str]:
+    """Build the env-override CLI arguments for a coherence sweep point.
+
+    Args:
+        coherence: The sweep point; None (turbulence study) adds nothing.
+        step_flag: Flag name for the decision interval (train.py and the
+            eval worker both use ``--step-time``).
+
+    Returns:
+        Argument list to append to a train.py or eval-worker command.
+    """
+    if coherence is None:
+        return []
+    args = ["--coherence-large", coherence.coherence_large,
+            "--coherence-small", coherence.coherence_small]
+    if coherence.step_time_s is not None:
+        args += [step_flag, coherence.step_time_s]
+    if coherence.episode_steps is not None:
+        args += ["--episode-steps", coherence.episode_steps]
+    return args
+
+
 def train_regime_policy(regime: str, c2n: str, total_steps: int,
-                        checkpoint: Path, train_seed: int) -> None:
-    """Train a fresh PPO policy for one regime via the train.py CLI.
+                        checkpoint: Path, train_seed: int,
+                        coherence: CoherenceConfig | None = None) -> None:
+    """Train a fresh PPO policy for one sweep point via the train.py CLI.
 
     Runs in a subprocess because the ns3-ai shared-memory interface can
     only be created once per process.
 
     Args:
-        regime: Regime name (for logging only).
+        regime: Sweep point name (for logging only).
         c2n: C2n value the env is trained at.
         total_steps: Environment steps of training.
         checkpoint: Where the trained weights are saved.
         train_seed: Global training seed (also the first episode's run
             number; disjoint from the evaluation seed range).
+        coherence: Optional coherence sweep point (correlated study).
 
     Raises:
         subprocess.CalledProcessError: If training fails.
@@ -306,7 +431,8 @@ def train_regime_policy(regime: str, c2n: str, total_steps: int,
         [sys.executable, str(_AGENT_DIR / "train.py"), "--env", "ns3",
          "--c2n", c2n, "--total-steps", str(total_steps),
          "--rollout-steps", "500", "--seed", str(train_seed),
-         "--checkpoint-path", str(checkpoint)],
+         "--checkpoint-path", str(checkpoint),
+         *_coherence_cli_args(coherence)],
         cwd=_AGENT_DIR,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -315,15 +441,18 @@ def train_regime_policy(regime: str, c2n: str, total_steps: int,
 
 
 def eval_env_policies(regime: str, policies: list[str], episodes: int,
-                      seed: int, sim_config: str) -> list[EpisodeRow]:
-    """Evaluate env-driven policies for one regime in a worker subprocess.
+                      seed: int, sim_config: str, c2n: str | None = None,
+                      coherence: CoherenceConfig | None = None) -> list[EpisodeRow]:
+    """Evaluate env-driven policies for one sweep point in a worker subprocess.
 
     Args:
-        regime: Regime to evaluate.
+        regime: Sweep point to evaluate (regime or coherence config name).
         policies: Env-driven policy names (no aodv).
         episodes: Episodes per policy.
         seed: First episode's ns-3 run number.
         sim_config: Path to sim_config.yaml.
+        c2n: C2n override; None derives it from the regime name.
+        coherence: Optional coherence sweep point (correlated study).
 
     Returns:
         Parsed episode rows from the worker's FSO-ROW lines.
@@ -334,7 +463,10 @@ def eval_env_policies(regime: str, policies: list[str], episodes: int,
     """
     cmd = [sys.executable, str(Path(__file__).resolve()), "--eval-worker",
            "--regime", regime, "--episodes", str(episodes),
-           "--seed", str(seed), "--sim-config", sim_config]
+           "--seed", str(seed), "--sim-config", sim_config,
+           *_coherence_cli_args(coherence)]
+    if c2n is not None:
+        cmd += ["--c2n", c2n]
     for policy in policies:
         cmd += ["--policy", policy]
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -394,8 +526,9 @@ def merge_rows(existing: list[dict], new_rows: list[EpisodeRow]) -> list[dict]:
     replaced = {(row.regime, row.policy) for row in new_rows}
     kept = [r for r in existing if (r["regime"], r["policy"]) not in replaced]
     combined = kept + [{k: str(v) for k, v in asdict(row).items()} for row in new_rows]
-    regime_order = {name: i for i, name in enumerate(REGIMES)}
-    policy_order = {name: i for i, name in enumerate(POLICIES)}
+    regime_order = {name: i
+                    for i, name in enumerate([*REGIMES, *COHERENCE_CONFIGS])}
+    policy_order = {name: i for i, name in enumerate(ALL_POLICIES)}
     combined.sort(key=lambda r: (regime_order.get(r["regime"], 99),
                                  policy_order.get(r["policy"], 99),
                                  int(r["episode"])))
@@ -423,9 +556,19 @@ def parse_args() -> argparse.Namespace:
         The parsed namespace.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--regime", action="append", choices=sorted(REGIMES),
-                        help="restrict to this regime (repeatable; default all)")
-    parser.add_argument("--policy", action="append", choices=POLICIES,
+    parser.add_argument("--study", choices=("turbulence", "correlated"),
+                        default="turbulence",
+                        help="turbulence: Phase 5 C2n sweep (default); "
+                             "correlated: Phase 6 coherence-time sweep")
+    parser.add_argument("--regime", action="append",
+                        choices=sorted(REGIMES) + sorted(COHERENCE_CONFIGS),
+                        help="restrict to this turbulence regime "
+                             "(repeatable; default all)")
+    parser.add_argument("--coherence", action="append",
+                        choices=sorted(COHERENCE_CONFIGS),
+                        help="restrict --study correlated to this coherence "
+                             "config (repeatable; default all)")
+    parser.add_argument("--policy", action="append", choices=ALL_POLICIES,
                         help="restrict to this policy (repeatable; default all)")
     parser.add_argument("--episodes", type=int, default=10,
                         help="evaluation episodes per policy per regime")
@@ -441,6 +584,16 @@ def parse_args() -> argparse.Namespace:
                         help="path to sim_config.yaml")
     parser.add_argument("--eval-worker", action="store_true",
                         help=argparse.SUPPRESS)
+    # Worker-only env overrides, set by the orchestrator
+    parser.add_argument("--c2n", type=str, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--coherence-large", type=str, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--coherence-small", type=str, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--step-time", type=str, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--episode-steps", type=str, default=None,
+                        help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -451,37 +604,55 @@ def main() -> None:
         eval_worker(args)
         return
 
-    regimes = sorted(args.regime or list(REGIMES), key=list(REGIMES).index)
-    policies = [p for p in POLICIES if p in (args.policy or POLICIES)]
+    correlated = args.study == "correlated"
+    if correlated:
+        selected = args.coherence or list(COHERENCE_CONFIGS)
+        cells = [(name, CORRELATED_C2N, COHERENCE_CONFIGS[name])
+                 for name in COHERENCE_CONFIGS if name in selected]
+        base_policies = CORRELATED_POLICIES
+        raw_csv = CORRELATED_RAW_CSV
+        train_steps = {name: 1000 if args.quick else CORRELATED_TRAIN_STEPS
+                       for name, _, _ in cells}
+    else:
+        regimes = sorted(args.regime or list(REGIMES), key=list(REGIMES).index)
+        cells = [(regime, REGIMES[regime], None) for regime in regimes]
+        base_policies = POLICIES
+        raw_csv = RAW_CSV
+        train_steps = dict.fromkeys(TRAIN_STEPS, 1000) if args.quick else TRAIN_STEPS
+
+    policies = [p for p in base_policies if p in (args.policy or base_policies)]
     episodes = 2 if args.quick else args.episodes
-    train_steps = dict.fromkeys(TRAIN_STEPS, 1000) if args.quick else TRAIN_STEPS
 
     from ns3ai_shim import DEFAULT_NS3_PATH, load_flat_yaml, ns3_settings
 
     sim_config = str(Path(args.sim_config).resolve())
     config = load_flat_yaml(sim_config)
     existing: list[dict] = []
-    if RAW_CSV.exists():
-        with open(RAW_CSV, newline="", encoding="utf-8") as fp:
+    if raw_csv.exists():
+        with open(raw_csv, newline="", encoding="utf-8") as fp:
             existing = list(csv.DictReader(fp))
 
     new_rows: list[EpisodeRow] = []
     timings: list[tuple[str, str, float]] = []
     study_start = time.monotonic()
 
-    for regime in regimes:
-        c2n = REGIMES[regime]
-        print(f"\n=== regime {regime} (C2n={c2n}) ===", flush=True)
+    for regime, c2n, coherence in cells:
+        detail = "" if coherence is None else (
+            f", tau {coherence.coherence_large}/{coherence.coherence_small}")
+        print(f"\n=== {regime} (C2n={c2n}{detail}) ===", flush=True)
 
-        if "ppo" in policies:
-            checkpoint = CHECKPOINTS_DIR / f"ppo_{regime}.pt"
+        for variant in [p for p in policies
+                        if p.startswith("ppo") and p != "ppo-transfer"]:
+            checkpoint = (CHECKPOINTS_DIR /
+                          f"{variant.replace('-', '_')}_{regime}.pt")
             if args.retrain or not checkpoint.exists():
                 start = time.monotonic()
                 train_regime_policy(regime, c2n, train_steps[regime],
-                                    checkpoint, args.train_seed)
+                                    checkpoint, args.train_seed, coherence)
                 elapsed = time.monotonic() - start
-                timings.append((regime, "ppo-train", elapsed))
-                print(f"[{regime}] training done in {elapsed:.0f}s", flush=True)
+                timings.append((regime, f"{variant}-train", elapsed))
+                print(f"[{regime}] {variant} training done in {elapsed:.0f}s",
+                      flush=True)
             else:
                 print(f"[{regime}] reusing checkpoint {checkpoint}")
 
@@ -489,7 +660,9 @@ def main() -> None:
         if env_policies:
             start = time.monotonic()
             rows = eval_env_policies(regime, env_policies, episodes,
-                                     args.seed, sim_config)
+                                     args.seed, sim_config,
+                                     c2n=c2n if correlated else None,
+                                     coherence=coherence)
             new_rows.extend(rows)
             timings.append((regime, "env-eval", time.monotonic() - start))
             for row in rows:
@@ -500,6 +673,13 @@ def main() -> None:
         if "aodv" in policies:
             settings = ns3_settings(config, args.seed)
             settings["c2n"] = c2n
+            if coherence is not None:
+                settings["coherenceLarge"] = coherence.coherence_large
+                settings["coherenceSmall"] = coherence.coherence_small
+                if coherence.step_time_s is not None:
+                    settings["stepTime"] = coherence.step_time_s
+                if coherence.episode_steps is not None:
+                    settings["episodeSteps"] = coherence.episode_steps
             start = time.monotonic()
             for ep in range(episodes):
                 metrics = run_aodv_episode(settings, args.seed + ep, DEFAULT_NS3_PATH)
@@ -511,12 +691,12 @@ def main() -> None:
                       f"delay={metrics['mean_delay_ms']:.3f}ms", flush=True)
             timings.append((regime, "aodv", time.monotonic() - start))
 
-        # Persist after every regime so a crash never loses finished work
-        write_raw_csv(RAW_CSV, merge_rows(existing, new_rows))
+        # Persist after every sweep point so a crash never loses finished work
+        write_raw_csv(raw_csv, merge_rows(existing, new_rows))
 
     rows = merge_rows(existing, new_rows)
-    write_raw_csv(RAW_CSV, rows)
-    print(f"\nwrote {len(rows)} rows ({len(new_rows)} new) to {RAW_CSV}")
+    write_raw_csv(raw_csv, rows)
+    print(f"\nwrote {len(rows)} rows ({len(new_rows)} new) to {raw_csv}")
 
     print("\nwall time breakdown:")
     for regime, phase, seconds in timings:

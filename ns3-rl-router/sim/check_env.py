@@ -45,6 +45,14 @@ def main() -> int:
     parser.add_argument("--c2n", type=str, default=None,
                         help="override C2n [m^-2/3], e.g. 1e-13 for strong "
                              "turbulence")
+    parser.add_argument("--coherence-large", type=str, default=None,
+                        help="override the large-scale fading coherence time, "
+                             "e.g. 500ms (0ms = i.i.d.)")
+    parser.add_argument("--coherence-small", type=str, default=None,
+                        help="override the small-scale fading coherence time, "
+                             "e.g. 100ms (0ms = i.i.d.)")
+    parser.add_argument("--step-time", type=str, default=None,
+                        help="override the decision interval [s], e.g. 0.05")
     args = parser.parse_args()
 
     add_gym_msg_path(args.ns3_path)
@@ -54,6 +62,12 @@ def main() -> int:
     settings = ns3_settings(config, args.seed)
     if args.c2n is not None:
         settings["c2n"] = args.c2n
+    if args.coherence_large is not None:
+        settings["coherenceLarge"] = args.coherence_large
+    if args.coherence_small is not None:
+        settings["coherenceSmall"] = args.coherence_small
+    if args.step_time is not None:
+        settings["stepTime"] = args.step_time
     # Size the episode so the last step consumes the simulation-end state,
     # exercising the clean done=True termination path
     settings["episodeSteps"] = str(args.steps)
@@ -73,7 +87,7 @@ def main() -> int:
         obs, _ = env.reset()
         obs = np.asarray(obs)
         print(f"reset: obs shape={obs.shape} dtype={obs.dtype}")
-        print(f"  obs[link0] (snrMarginDb, dropRate, scintIndex, queuePkts) "
+        print(f"  obs[link0] (snrMarginDb, linkPer, scintIndex, queuePkts) "
               f"= {np.round(obs[:4], 4)}")
 
         for step in range(args.steps):

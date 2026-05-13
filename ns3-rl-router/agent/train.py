@@ -64,6 +64,14 @@ class TrainConfig:
         sim_config: Path to sim_config.yaml for the ns3 env. None uses
             the repo default (ns3-rl-router/config/sim_config.yaml).
         c2n: C2n override for the ns3 env [m^-2/3], e.g. "1e-13".
+        coherence_large: Large-scale fading coherence time override for
+            the ns3 env (ns-3 Time string, e.g. "500ms"; "0ms" = i.i.d.).
+        coherence_small: Small-scale fading coherence time override for
+            the ns3 env (same format as coherence_large).
+        step_time_s: Agent decision interval override for the ns3 env
+            [s], e.g. "0.05".
+        episode_steps: Decision steps per episode override for the
+            ns3 env.
         rewards_csv: Where to write per-episode rewards as CSV. None
             disables.
     """
@@ -88,6 +96,10 @@ class TrainConfig:
     env: str = "toy"
     sim_config: str | None = None
     c2n: str | None = None
+    coherence_large: str | None = None
+    coherence_small: str | None = None
+    step_time_s: str | None = None
+    episode_steps: int | None = None
     rewards_csv: str | None = None
 
     def ppo_config(self) -> PPOConfig:
@@ -269,6 +281,16 @@ def parse_args(argv: list[str] | None = None) -> TrainConfig:
                         help="sim_config.yaml path for --env ns3")
     parser.add_argument("--c2n", type=str, default=None,
                         help="C2n override for --env ns3, e.g. 1e-13")
+    parser.add_argument("--coherence-large", type=str, default=None,
+                        help="large-scale fading coherence time for --env ns3, "
+                             "e.g. 500ms (0ms = i.i.d.)")
+    parser.add_argument("--coherence-small", type=str, default=None,
+                        help="small-scale fading coherence time for --env ns3, "
+                             "e.g. 100ms (0ms = i.i.d.)")
+    parser.add_argument("--step-time", type=str, default=None, dest="step_time_s",
+                        help="decision interval [s] for --env ns3, e.g. 0.05")
+    parser.add_argument("--episode-steps", type=int, default=None,
+                        help="decision steps per episode for --env ns3")
     parser.add_argument("--rewards-csv", type=str, default=None,
                         help="write per-episode rewards to this CSV file")
     args = parser.parse_args(argv)
@@ -287,6 +309,10 @@ def parse_args(argv: list[str] | None = None) -> TrainConfig:
         "env",
         "sim_config",
         "c2n",
+        "coherence_large",
+        "coherence_small",
+        "step_time_s",
+        "episode_steps",
         "rewards_csv",
     ):
         value = getattr(args, name)
@@ -320,7 +346,15 @@ def resolve_env_factory(config: TrainConfig) -> EnvFactory:
         if value is not None:
             setattr(config, name, str(Path(value).resolve()))
     sim_config = str(Path(config.sim_config or DEFAULT_CONFIG_PATH).resolve())
-    return lambda: make_ns3_env(sim_config, c2n=config.c2n, seed=config.seed)
+    return lambda: make_ns3_env(
+        sim_config,
+        c2n=config.c2n,
+        seed=config.seed,
+        coherence_large=config.coherence_large,
+        coherence_small=config.coherence_small,
+        step_time_s=config.step_time_s,
+        episode_steps=config.episode_steps,
+    )
 
 
 def main() -> None:
