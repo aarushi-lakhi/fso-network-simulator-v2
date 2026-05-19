@@ -511,6 +511,9 @@ def main() -> None:
                       f"delay={metrics['mean_delay_ms']:.3f}ms", flush=True)
             timings.append((regime, "aodv", time.monotonic() - start))
 
+        # Persist after every regime so a crash never loses finished work
+        write_raw_csv(RAW_CSV, merge_rows(existing, new_rows))
+
     rows = merge_rows(existing, new_rows)
     write_raw_csv(RAW_CSV, rows)
     print(f"\nwrote {len(rows)} rows ({len(new_rows)} new) to {RAW_CSV}")
