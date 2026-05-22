@@ -326,6 +326,9 @@ Thumbs.db
 | 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | ✅ Complete | Merged via PR #6 (2026-07-03); random-action episodes verified over shared memory |
 | 4b — PPO Agent | `feat/ppo-routing-agent` | ✅ Complete | Merged via PR #7 (2026-07-03); 28 tests, 97% coverage. Integration merged via PR #8: PPO beats random by ~41% on the live mesh (PDR 0.724 vs 0.670, C²ₙ=10⁻¹³) |
 | 5 — Benchmarks | `feat/benchmark-suite` | ✅ Complete | Merged via PR #10 (2026-07-03). PPO converges to the optimal (best-static) policy; beats random by 41%, AODV by 15%. Full findings in `benchmarks/results/README.md` |
+| 6a — Correlated sampler (math) | `math/correlated-fading-sampler` | ✅ Complete | Merged via PR #16 (2026-07-07); SI identity holds on correlated chains within 1% |
+| 6b — ns-3 correlated fading | `feat/correlated-fso-fading` | ✅ Complete | Merged via PR #17 (2026-07-07); τ=0 bit-identical to i.i.d., 9/9 tests |
+| 6c — Correlated-fading study | `feat/correlated-fading-study` | ✅ Complete | Answer: no — memory is necessary but not sufficient. PPO stays constant-route even at τ=500 ms / 50 ms steps; PER observation fixed route *selection*, not switching. Analysis in `benchmarks/results/README.md` |
 
 **Status legend:** 🔲 Not started · 🔄 In progress · ✅ Complete · ⏸ Blocked
 
@@ -344,6 +347,7 @@ Thumbs.db
 | 2026-07-03 | No `Co-Authored-By` trailers on commits | User preference; supersedes earlier co-author policy in handoff.md |
 | 2026-07-03 | ns3-ai natively on macOS — Docker/Lima fallback not needed | a-plus-b shared-memory example verified end-to-end on Apple Silicon. ns-3 toolchain pinned to python@3.11 (ns-3.40's `./ns3` breaks on 3.14; ns3-ai bindings want ≤3.11); ns-3.40 needs a small libc++ compat patch, shipped in `setup/patches/` |
 | 2026-07-03 | Phase 5 baselines: best-static route, random routing, and AODV — not HWMP | HWMP is 802.11s-specific and the topology is PointToPoint (per the 2026-05-26 decision), so it can't apply. AODV runs at the IP layer and works over p2p links; together with best-fixed-route and random, it gives classical-reactive, oracle-ish, and floor baselines for the trained PPO policy |
+| 2026-07-03 | Phase 6 (extension): temporally correlated fading via Gaussian copula AR(1) applied per Gamma component | Phase 5 showed i.i.d. 1 ms block fading makes hold-the-best-route optimal — RL had nothing to exploit. The copula construction (correlated normal → Φ → Gamma quantile, per component with separate large/small-scale coherence times) preserves the exact Gamma-Gamma marginal, so all Phase 2 validation still holds while coherence becomes tunable. 6c may add slow per-link C²ₙ drift (OU process) as the minutes-scale "weather" signal and/or faster decision steps |
 
 ---
 
