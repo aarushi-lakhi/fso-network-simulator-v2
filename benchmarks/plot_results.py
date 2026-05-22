@@ -123,16 +123,20 @@ def plot_metric(
     bar_width = group_width / n
     x = np.arange(len(regimes))
 
+    nonnegative = metric != "reward"
     for i, policy in enumerate(policies):
         offsets = x - group_width / 2 + (i + 0.5) * bar_width
-        means = [table[(r, policy)][f"{metric}_mean"]
-                 if (r, policy) in table else np.nan for r in regimes]
-        stds = [table[(r, policy)][f"{metric}_std"]
-                if (r, policy) in table else 0.0 for r in regimes]
+        means = np.array([table[(r, policy)][f"{metric}_mean"]
+                          if (r, policy) in table else np.nan for r in regimes])
+        stds = np.array([table[(r, policy)][f"{metric}_std"]
+                         if (r, policy) in table else 0.0 for r in regimes])
+        # Whiskers on nonnegative metrics must not cross zero
+        lower = np.minimum(stds, means) if nonnegative else stds
         ax.bar(offsets, means, width=bar_width * 0.9,
                color=POLICY_COLORS[policy], label=POLICY_LABELS[policy],
-               yerr=stds, error_kw={"ecolor": "#333333", "capsize": 3,
-                                    "capthick": 1.0, "elinewidth": 1.0},
+               yerr=np.vstack([lower, stds]),
+               error_kw={"ecolor": "#333333", "capsize": 3,
+                         "capthick": 1.0, "elinewidth": 1.0},
                zorder=3)
 
     ax.set_xticks(x)
