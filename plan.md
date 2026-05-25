@@ -320,7 +320,7 @@ Thumbs.db
 | 3 — ns-3 FSO Channel | `feat/ns3-fso-propagation-model` | ✅ Complete | Merged to `dev` via PR #4 (2026-07-03); test suite green, 5-node mesh demo works |
 | 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | ✅ Complete | Merged via PR #6 (2026-07-03); random-action episodes verified over shared memory |
 | 4b — PPO Agent | `feat/ppo-routing-agent` | ✅ Complete | Merged via PR #7 (2026-07-03); 28 tests, 97% coverage. Integration merged via PR #8: PPO beats random by ~41% on the live mesh (PDR 0.724 vs 0.670, C²ₙ=10⁻¹³) |
-| 5 — Benchmarks | `feat/benchmark-suite` | 🔄 In progress | Started 2026-07-03; PPO vs best-static / random / AODV across C²ₙ sweep |
+| 5 — Benchmarks | `feat/benchmark-suite` | ✅ Complete | Merged via PR #10 (2026-07-03). PPO converges to the optimal (best-static) policy; beats random by 41%, AODV by 15%. Full findings in `benchmarks/results/README.md` |
 
 **Status legend:** 🔲 Not started · 🔄 In progress · ✅ Complete · ⏸ Blocked
 
