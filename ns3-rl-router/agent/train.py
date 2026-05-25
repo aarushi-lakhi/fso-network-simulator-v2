@@ -72,6 +72,10 @@ class TrainConfig:
             [s], e.g. "0.05".
         episode_steps: Decision steps per episode override for the
             ns3 env.
+        topology: Mesh layout override for the ns3 env ("pentagon" or
+            "disjoint", see sim/README.md).
+        traffic_protocol: Transport override for the ns3 env's 0->3
+            flow ("udp" or "tcp").
         rewards_csv: Where to write per-episode rewards as CSV. None
             disables.
     """
@@ -100,6 +104,8 @@ class TrainConfig:
     coherence_small: str | None = None
     step_time_s: str | None = None
     episode_steps: int | None = None
+    topology: str | None = None
+    traffic_protocol: str | None = None
     rewards_csv: str | None = None
 
     def ppo_config(self) -> PPOConfig:
@@ -291,6 +297,12 @@ def parse_args(argv: list[str] | None = None) -> TrainConfig:
                         help="decision interval [s] for --env ns3, e.g. 0.05")
     parser.add_argument("--episode-steps", type=int, default=None,
                         help="decision steps per episode for --env ns3")
+    parser.add_argument("--topology", type=str, default=None,
+                        choices=("pentagon", "disjoint"),
+                        help="mesh layout for --env ns3")
+    parser.add_argument("--traffic-protocol", type=str, default=None,
+                        choices=("udp", "tcp"), dest="traffic_protocol",
+                        help="transport of the 0->3 flow for --env ns3")
     parser.add_argument("--rewards-csv", type=str, default=None,
                         help="write per-episode rewards to this CSV file")
     args = parser.parse_args(argv)
@@ -313,6 +325,8 @@ def parse_args(argv: list[str] | None = None) -> TrainConfig:
         "coherence_small",
         "step_time_s",
         "episode_steps",
+        "topology",
+        "traffic_protocol",
         "rewards_csv",
     ):
         value = getattr(args, name)
@@ -354,6 +368,8 @@ def resolve_env_factory(config: TrainConfig) -> EnvFactory:
         coherence_small=config.coherence_small,
         step_time_s=config.step_time_s,
         episode_steps=config.episode_steps,
+        topology=config.topology,
+        traffic_protocol=config.traffic_protocol,
     )
 
 

@@ -120,6 +120,12 @@ def main() -> None:
                         help="decision interval [s], e.g. 0.05")
     parser.add_argument("--episode-steps", type=int, default=None,
                         help="decision steps per episode")
+    parser.add_argument("--topology", type=str, default=None,
+                        choices=("pentagon", "disjoint"),
+                        help="mesh layout (see sim/README.md)")
+    parser.add_argument("--traffic-protocol", type=str, default=None,
+                        choices=("udp", "tcp"), dest="traffic_protocol",
+                        help="transport of the 0->3 flow")
     parser.add_argument("--sim-config", type=str, default=DEFAULT_CONFIG_PATH,
                         help="path to sim_config.yaml")
     parser.add_argument("--checkpoint", type=str, default=None,
@@ -133,7 +139,9 @@ def main() -> None:
                        coherence_large=args.coherence_large,
                        coherence_small=args.coherence_small,
                        step_time_s=args.step_time,
-                       episode_steps=args.episode_steps)
+                       episode_steps=args.episode_steps,
+                       topology=args.topology,
+                       traffic_protocol=args.traffic_protocol)
     agent = None
     if checkpoint is not None:
         obs_dim = int(np.prod(env.observation_space.shape))
