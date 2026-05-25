@@ -53,6 +53,12 @@ def main() -> int:
                              "e.g. 100ms (0ms = i.i.d.)")
     parser.add_argument("--step-time", type=str, default=None,
                         help="override the decision interval [s], e.g. 0.05")
+    parser.add_argument("--topology", type=str, default=None,
+                        choices=["pentagon", "disjoint"],
+                        help="override the mesh layout")
+    parser.add_argument("--traffic-protocol", type=str, default=None,
+                        choices=["udp", "tcp"],
+                        help="override the 0->3 flow's transport")
     args = parser.parse_args()
 
     add_gym_msg_path(args.ns3_path)
@@ -68,6 +74,10 @@ def main() -> int:
         settings["coherenceSmall"] = args.coherence_small
     if args.step_time is not None:
         settings["stepTime"] = args.step_time
+    if args.topology is not None:
+        settings["topology"] = args.topology
+    if args.traffic_protocol is not None:
+        settings["trafficProtocol"] = args.traffic_protocol
     # Size the episode so the last step consumes the simulation-end state,
     # exercising the clean done=True termination path
     settings["episodeSteps"] = str(args.steps)
