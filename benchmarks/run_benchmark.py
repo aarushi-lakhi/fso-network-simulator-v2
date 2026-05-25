@@ -1,6 +1,6 @@
 """Benchmark orchestrator: PPO vs classical routing baselines.
 
-Two studies share this orchestrator:
+Three studies share this orchestrator:
 
 * ``--study turbulence`` (Phase 5, default) sweeps the three turbulence
   regimes (C2n weak 1e-17, moderate 1e-15, strong 1e-13) with i.i.d.
@@ -10,6 +10,13 @@ Two studies share this orchestrator:
   PPO can exploit channel memory; results go to
   results/correlated_raw.csv with the coherence config name in the
   ``regime`` column.
+* ``--study adaptation`` (Phase 7) fixes strong turbulence on the
+  link-disjoint topology and sweeps the environment conditions that
+  Phase 6 identified as blocking profitable route switching
+  (ADAPTATION_CONFIGS: i.i.d. UDP control, correlated fading + UDP,
+  correlated fading + TCP); results go to results/adaptation_raw.csv.
+  Rows additionally carry goodput/retx (TCP) and the number of
+  within-episode route switches.
 
 Policies compared per sweep point on the 5-node FSO mesh:
 
@@ -42,6 +49,8 @@ Typical usage:
     $ python run_benchmark.py --regime strong --policy aodv
     $ python run_benchmark.py --study correlated  # full Phase 6 study
     $ python run_benchmark.py --study correlated --coherence tau500-100
+    $ python run_benchmark.py --study adaptation  # full Phase 7 study
+    $ python run_benchmark.py --study adaptation --regime disjoint-tau500-tcp
 """
 
 from __future__ import annotations
@@ -67,6 +76,7 @@ for _dir in (str(_AGENT_DIR), str(_SIM_DIR)):
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 RAW_CSV = RESULTS_DIR / "raw_results.csv"
 CORRELATED_RAW_CSV = RESULTS_DIR / "correlated_raw.csv"
+ADAPTATION_RAW_CSV = RESULTS_DIR / "adaptation_raw.csv"
 CHECKPOINTS_DIR = RESULTS_DIR / "checkpoints"
 PHASE4_CHECKPOINT = _AGENT_DIR / "checkpoints" / "ns3_ppo.pt"
 DEFAULT_SIM_CONFIG = _REPO_DIR / "ns3-rl-router" / "config" / "sim_config.yaml"
@@ -106,7 +116,7 @@ GREEDY_MARGIN = 0.1
 
 @dataclass(frozen=True)
 class CoherenceConfig:
-    """One coherence sweep point of the Phase 6 correlated-fading study.
+    """One environment sweep point (Phase 6 coherence, Phase 7 adaptation).
 
     Attributes:
         coherence_large: Large-scale fading coherence time (ns-3 Time
@@ -117,12 +127,18 @@ class CoherenceConfig:
         episode_steps: Decision steps per episode override; None keeps
             the sim_config default (100). Scale it with 1/step_time_s so
             every sweep point simulates the same 10 s episode.
+        topology: Mesh layout override ("pentagon"/"disjoint"); None
+            keeps the sim_config default (pentagon).
+        traffic_protocol: Transport override of the 0->3 flow
+            ("udp"/"tcp"); None keeps the sim_config default (udp).
     """
 
     coherence_large: str
     coherence_small: str
     step_time_s: str | None = None
     episode_steps: str | None = None
+    topology: str | None = None
+    traffic_protocol: str | None = None
 
 
 # Phase 6 coherence sweep, all at strong turbulence (C2n = CORRELATED_C2N).
@@ -149,8 +165,35 @@ CORRELATED_TRAIN_STEPS = 80_000
 # ppo-transfer is a Phase 5 cross-regime datapoint; it adds nothing here.
 CORRELATED_POLICIES = tuple(p for p in ALL_POLICIES if p != "ppo-transfer")
 
+# Phase 7 adaptation study: strong turbulence on the link-disjoint
+# topology (routes share no links, so fade epochs are independent per
+# route). The iid cell is the control where holding the best route is
+# provably optimal; the tau500 cells add channel memory (UDP) and then
+# non-linear loss compounding (TCP). Both correlated cells use 50 ms
+# decision steps: a Phase 7 probe on the disjoint topology (see
+# results/README.md) matched Phase 6 — the linkPer observation's lag-1
+# autocorrelation across steps is ~0.6 at 50 ms vs ~0.4 at 100 ms, and
+# 50 ms gives the agent ~10 decisions per large-scale fade epoch
+# (tau_L = 500 ms) instead of 5. 200 steps keep the 10 s episode;
+# train and eval share each cell's step settings.
+ADAPTATION_CONFIGS: dict[str, CoherenceConfig] = {
+    "disjoint-iid-udp": CoherenceConfig(
+        "0ms", "0ms", topology="disjoint", traffic_protocol="udp"),
+    "disjoint-tau500-udp": CoherenceConfig(
+        "500ms", "100ms", "0.05", "200",
+        topology="disjoint", traffic_protocol="udp"),
+    "disjoint-tau500-tcp": CoherenceConfig(
+        "500ms", "100ms", "0.05", "200",
+        topology="disjoint", traffic_protocol="tcp"),
+}
+
+ADAPTATION_TRAIN_STEPS = 80_000
+ADAPTATION_POLICIES = ("ppo", "static-0", "static-1", "static-2", "static-3",
+                       "random", "aodv")
+
 CSV_FIELDS = ("regime", "c2n", "policy", "episode", "sim_seed", "reward",
-              "drops", "tx_pkts", "rx_pkts", "pdr", "mean_delay_ms")
+              "drops", "tx_pkts", "rx_pkts", "pdr", "mean_delay_ms",
+              "goodput_mbps", "retx", "switches")
 
 ROW_PREFIX = "FSO-ROW "
 
@@ -171,6 +214,12 @@ class EpisodeRow:
         rx_pkts: Flow packets delivered to the sink.
         pdr: Flow packet delivery ratio (0 when nothing sent).
         mean_delay_ms: Packet-weighted mean end-to-end delay [ms].
+        goodput_mbps: Mean per-step application goodput [Mbps]; 0 for
+            UDP episodes (the field is TCP-only).
+        retx: TCP data segments retransmitted over the episode; 0 for UDP.
+        switches: Route changes within the episode (steps whose route
+            differs from the previous step's; the episode starts on
+            route 0). 0 for AODV, whose routing is not step-observable.
     """
 
     regime: str
@@ -184,6 +233,9 @@ class EpisodeRow:
     rx_pkts: int
     pdr: float
     mean_delay_ms: float
+    goodput_mbps: float = 0.0
+    retx: int = 0
+    switches: int = 0
 
     def to_csv_line(self) -> str:
         """Serialise as a raw CSV data line (CSV_FIELDS order)."""
@@ -205,7 +257,10 @@ class EpisodeRow:
                    episode=int(parts["episode"]), sim_seed=int(parts["sim_seed"]),
                    reward=float(parts["reward"]), drops=int(parts["drops"]),
                    tx_pkts=int(parts["tx_pkts"]), rx_pkts=int(parts["rx_pkts"]),
-                   pdr=float(parts["pdr"]), mean_delay_ms=float(parts["mean_delay_ms"]))
+                   pdr=float(parts["pdr"]), mean_delay_ms=float(parts["mean_delay_ms"]),
+                   goodput_mbps=float(parts.get("goodput_mbps", 0.0)),
+                   retx=int(parts.get("retx", 0)),
+                   switches=int(parts.get("switches", 0)))
 
 
 def _metrics_from_steps(step_fields: list[dict[str, str]],
@@ -220,17 +275,27 @@ def _metrics_from_steps(step_fields: list[dict[str, str]],
 
     Returns:
         Dict with reward (0 if no reward_key), drops, tx_pkts, rx_pkts,
-        pdr, and packet-weighted mean_delay_ms.
+        pdr, packet-weighted mean_delay_ms, goodput_mbps (step mean; 0
+        without TCP fields), retx, and switches (route changes across
+        steps; 0 without route fields).
     """
     reward_total = 0.0
-    drops = tx = rx = 0
+    drops = tx = rx = retx = switches = 0
     delay_weighted_sum = 0.0
+    goodput_sum = 0.0
+    route = "0"  # both env and sim start every episode on route 0
     for fields in step_fields:
         step_rx = int(fields.get("rxPkts", 0))
         drops += int(fields.get("drops", 0))
         tx += int(fields.get("txPkts", 0))
         rx += step_rx
         delay_weighted_sum += float(fields.get("meanDelayMs", 0.0)) * step_rx
+        goodput_sum += float(fields.get("goodputMbps", 0.0))
+        retx += int(fields.get("retx", 0))
+        step_route = fields.get("route", route)
+        if step_route != route:
+            switches += 1
+            route = step_route
         if reward_key is not None:
             reward_total += float(fields.get(reward_key, 0.0))
     return {
@@ -240,6 +305,9 @@ def _metrics_from_steps(step_fields: list[dict[str, str]],
         "rx_pkts": rx,
         "pdr": rx / tx if tx else 0.0,
         "mean_delay_ms": delay_weighted_sum / rx if rx else 0.0,
+        "goodput_mbps": goodput_sum / len(step_fields) if step_fields else 0.0,
+        "retx": retx,
+        "switches": switches,
     }
 
 
@@ -356,7 +424,9 @@ def eval_worker(args: argparse.Namespace) -> None:
                        coherence_large=args.coherence_large,
                        coherence_small=args.coherence_small,
                        step_time_s=args.step_time,
-                       episode_steps=args.episode_steps)
+                       episode_steps=args.episode_steps,
+                       topology=args.topology,
+                       traffic_protocol=args.traffic_protocol)
     try:
         for policy in policies:
             worker_policy = policy
@@ -401,6 +471,10 @@ def _coherence_cli_args(coherence: CoherenceConfig | None,
         args += [step_flag, coherence.step_time_s]
     if coherence.episode_steps is not None:
         args += ["--episode-steps", coherence.episode_steps]
+    if coherence.topology is not None:
+        args += ["--topology", coherence.topology]
+    if coherence.traffic_protocol is not None:
+        args += ["--traffic-protocol", coherence.traffic_protocol]
     return args
 
 
@@ -427,11 +501,13 @@ def train_regime_policy(regime: str, c2n: str, total_steps: int,
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     print(f"[{regime}] training PPO for {total_steps} steps at C2n={c2n} ...",
           flush=True)
+    rewards_csv = checkpoint.with_name(checkpoint.stem + "_rewards.csv")
     subprocess.run(
         [sys.executable, str(_AGENT_DIR / "train.py"), "--env", "ns3",
          "--c2n", c2n, "--total-steps", str(total_steps),
          "--rollout-steps", "500", "--seed", str(train_seed),
          "--checkpoint-path", str(checkpoint),
+         "--rewards-csv", str(rewards_csv),
          *_coherence_cli_args(coherence)],
         cwd=_AGENT_DIR,
         stdout=subprocess.DEVNULL,
@@ -527,7 +603,8 @@ def merge_rows(existing: list[dict], new_rows: list[EpisodeRow]) -> list[dict]:
     kept = [r for r in existing if (r["regime"], r["policy"]) not in replaced]
     combined = kept + [{k: str(v) for k, v in asdict(row).items()} for row in new_rows]
     regime_order = {name: i
-                    for i, name in enumerate([*REGIMES, *COHERENCE_CONFIGS])}
+                    for i, name in enumerate([*REGIMES, *COHERENCE_CONFIGS,
+                                              *ADAPTATION_CONFIGS])}
     policy_order = {name: i for i, name in enumerate(ALL_POLICIES)}
     combined.sort(key=lambda r: (regime_order.get(r["regime"], 99),
                                  policy_order.get(r["policy"], 99),
@@ -556,13 +633,15 @@ def parse_args() -> argparse.Namespace:
         The parsed namespace.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--study", choices=("turbulence", "correlated"),
+    parser.add_argument("--study", choices=("turbulence", "correlated", "adaptation"),
                         default="turbulence",
                         help="turbulence: Phase 5 C2n sweep (default); "
-                             "correlated: Phase 6 coherence-time sweep")
+                             "correlated: Phase 6 coherence-time sweep; "
+                             "adaptation: Phase 7 disjoint-topology study")
     parser.add_argument("--regime", action="append",
-                        choices=sorted(REGIMES) + sorted(COHERENCE_CONFIGS),
-                        help="restrict to this turbulence regime "
+                        choices=(sorted(REGIMES) + sorted(COHERENCE_CONFIGS)
+                                 + sorted(ADAPTATION_CONFIGS)),
+                        help="restrict to this sweep point "
                              "(repeatable; default all)")
     parser.add_argument("--coherence", action="append",
                         choices=sorted(COHERENCE_CONFIGS),
@@ -576,6 +655,9 @@ def parse_args() -> argparse.Namespace:
                         help="ns-3 run number of the first evaluation episode")
     parser.add_argument("--train-seed", type=int, default=42,
                         help="training seed (and first training run number)")
+    parser.add_argument("--train-steps", type=int, default=None,
+                        help="override the per-cell PPO training budget "
+                             "[env steps]")
     parser.add_argument("--retrain", action="store_true",
                         help="retrain PPO even if a regime checkpoint exists")
     parser.add_argument("--quick", action="store_true",
@@ -594,6 +676,10 @@ def parse_args() -> argparse.Namespace:
                         help=argparse.SUPPRESS)
     parser.add_argument("--episode-steps", type=str, default=None,
                         help=argparse.SUPPRESS)
+    parser.add_argument("--topology", type=str, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--traffic-protocol", type=str, default=None,
+                        dest="traffic_protocol", help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -605,6 +691,7 @@ def main() -> None:
         return
 
     correlated = args.study == "correlated"
+    adaptation = args.study == "adaptation"
     if correlated:
         selected = args.coherence or list(COHERENCE_CONFIGS)
         cells = [(name, CORRELATED_C2N, COHERENCE_CONFIGS[name])
@@ -612,6 +699,15 @@ def main() -> None:
         base_policies = CORRELATED_POLICIES
         raw_csv = CORRELATED_RAW_CSV
         train_steps = {name: 1000 if args.quick else CORRELATED_TRAIN_STEPS
+                       for name, _, _ in cells}
+    elif adaptation:
+        selected = args.regime or list(ADAPTATION_CONFIGS)
+        cells = [(name, CORRELATED_C2N, ADAPTATION_CONFIGS[name])
+                 for name in ADAPTATION_CONFIGS if name in selected]
+        base_policies = ADAPTATION_POLICIES
+        raw_csv = ADAPTATION_RAW_CSV
+        budget = args.train_steps or ADAPTATION_TRAIN_STEPS
+        train_steps = {name: 1000 if args.quick else budget
                        for name, _, _ in cells}
     else:
         regimes = sorted(args.regime or list(REGIMES), key=list(REGIMES).index)
@@ -661,7 +757,7 @@ def main() -> None:
             start = time.monotonic()
             rows = eval_env_policies(regime, env_policies, episodes,
                                      args.seed, sim_config,
-                                     c2n=c2n if correlated else None,
+                                     c2n=None if coherence is None else c2n,
                                      coherence=coherence)
             new_rows.extend(rows)
             timings.append((regime, "env-eval", time.monotonic() - start))
@@ -680,6 +776,10 @@ def main() -> None:
                     settings["stepTime"] = coherence.step_time_s
                 if coherence.episode_steps is not None:
                     settings["episodeSteps"] = coherence.episode_steps
+                if coherence.topology is not None:
+                    settings["topology"] = coherence.topology
+                if coherence.traffic_protocol is not None:
+                    settings["trafficProtocol"] = coherence.traffic_protocol
             start = time.monotonic()
             for ep in range(episodes):
                 metrics = run_aodv_episode(settings, args.seed + ep, DEFAULT_NS3_PATH)
