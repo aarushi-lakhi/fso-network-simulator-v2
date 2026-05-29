@@ -330,9 +330,9 @@ Thumbs.db
 | 6b — ns-3 correlated fading | `feat/correlated-fso-fading` | ✅ Complete | Merged via PR #17 (2026-07-07); τ=0 bit-identical to i.i.d., 9/9 tests |
 | 6c — Correlated-fading study | `feat/correlated-fading-study` | ✅ Complete | Answer: no — memory is necessary but not sufficient. PPO stays constant-route even at τ=500 ms / 50 ms steps; PER observation fixed route *selection*, not switching. Analysis in `benchmarks/results/README.md` |
 | CI | `chore/github-actions-ci` | 🔄 In progress | GitHub Actions: hermetic tests (prototype/agent/benchmarks) + ruff on every PR |
-| 7a — Adaptation-friendly environment | `feat/disjoint-routes-tcp` | 🔲 Not started | Link-disjoint route topology + optional TCP traffic in the FSO env — attacks the Phase 6 margin mechanism directly |
-| 7b — Policy memory | `feat/frame-stacked-obs` | 🔲 Not started | Frame-stacked observations (recurrent policy only if stacking is insufficient); only needed if 7a alone doesn't separate PPO from best-static |
-| 7c — Adaptation study | `feat/adaptation-study` | 🔲 Not started | 6c protocol on the 7a environment: does PPO finally beat best-static? Honest either way |
+| 7a — Adaptation-friendly environment | `feat/disjoint-routes-tcp` | ✅ Complete | Merged via PR #22 (2026-07-16); probe confirmed the per-episode best route flips on the disjoint mesh |
+| 7b — Policy memory | `feat/frame-stacked-obs` | ✅ Complete | Folded into 7c: `FlatFrameStack` wrapper (8 frames, 7 tests) — collapsed to constant-route exactly like plain PPO |
+| 7c — Adaptation study | `feat/adaptation-study` | ✅ Complete | Verdict: adaptation is now provably profitable (scripted greedy-PER beats best-static 8/10 in both correlated cells) and PPO still can't find it — collapses to constant routes, entropy ≈0.005 nats. Bottleneck moved from environment to optimizer. Analysis in `benchmarks/results/README.md` |
 
 **Status legend:** 🔲 Not started · 🔄 In progress · ✅ Complete · ⏸ Blocked
 

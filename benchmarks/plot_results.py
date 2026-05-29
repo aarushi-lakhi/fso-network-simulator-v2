@@ -1,18 +1,22 @@
 """Publication-quality plots of the benchmark summaries.
 
-Reads a summary CSV (written by parse_traces.py) and renders four
-grouped bar charts — PDR, mean delay, PHY drops, and episode reward per
-sweep point per policy, with +/- 1 std error bars — into results/plots/.
+Reads a summary CSV (written by parse_traces.py) and renders grouped
+bar charts — PDR, mean delay, PHY drops, and episode reward per sweep
+point per policy, with +/- 1 std error bars — into results/plots/.
 ``--study turbulence`` (default) plots the Phase 5 C2n sweep from
 results/summary.csv; ``--study correlated`` plots the Phase 6 fading
 coherence-time sweep from results/correlated_summary.csv (files prefixed
-``correlated_``). Styling follows prototype/turbulence_plots.py; the
-categorical palette is Okabe-Ito-derived and colorblind-validated
-(adjacent-pair CVD deltaE >= 12).
+``correlated_``); ``--study adaptation`` plots the Phase 7
+disjoint-topology study from results/adaptation_summary.csv (files
+prefixed ``adaptation_``, plus a route-switches chart). Styling follows
+prototype/turbulence_plots.py; the categorical palette is
+Okabe-Ito-derived and colorblind-validated (adjacent-pair CVD
+deltaE >= 12).
 
 Typical usage:
     $ python plot_results.py
     $ python plot_results.py --study correlated
+    $ python plot_results.py --study adaptation
     $ python plot_results.py --summary path/to/summary.csv
 """
 
@@ -44,13 +48,24 @@ COHERENCE_LABELS = {
     "tau500-100-step50": "τ_L/τ_S = 500/100 ms\n50 ms steps",
 }
 
+# Phase 7 adaptation study (strong turbulence, disjoint topology)
+ADAPTATION_ORDER = ("disjoint-iid-udp", "disjoint-tau500-udp",
+                    "disjoint-tau500-tcp")
+ADAPTATION_LABELS = {
+    "disjoint-iid-udp": "i.i.d. + UDP\n(control)",
+    "disjoint-tau500-udp": "τ_L/τ_S = 500/100 ms + UDP\n50 ms steps",
+    "disjoint-tau500-tcp": "τ_L/τ_S = 500/100 ms + TCP\n50 ms steps",
+}
+
 # Fixed policy -> color assignment (identity encoding, never re-ranked)
 POLICY_COLORS = {
     "ppo": "#0072B2",
     "ppo-per": "#D55E00",
     "ppo-per-ent": "#F0E442",
+    "ppo-stack": "#000000",
     "ppo-transfer": "#56B4E9",
     "best-static": "#009E73",
+    "greedy-per": "#999999",
     "random": "#E69F00",
     "aodv": "#CC79A7",
 }
@@ -59,8 +74,10 @@ POLICY_LABELS = {
     "ppo": "PPO (per-regime)",
     "ppo-per": "PPO (PER observation)",
     "ppo-per-ent": "PPO (PER obs, 160k, ent 0.03)",
+    "ppo-stack": "PPO (8-frame stack, 160k)",
     "ppo-transfer": "PPO (1e-13 ckpt)",
     "best-static": "Best static route",
+    "greedy-per": "Greedy PER (scripted)",
     "random": "Random",
     "aodv": "AODV",
 }
@@ -73,6 +90,14 @@ METRIC_SPECS = (
      "PHY drops per episode (lower is better)", "phy_drops.png"),
     ("reward", "Episode reward",
      "Episode reward (higher is better)", "reward.png"),
+)
+
+# Extra charts for --study adaptation (columns absent from older summaries)
+ADAPTATION_EXTRA_SPECS = (
+    ("switches", "Within-episode route switches",
+     "Route switches per episode", "switches.png"),
+    ("goodput_mbps", "Application goodput (TCP cells)",
+     "Mean goodput [Mbps] (higher is better)", "goodput.png"),
 )
 
 
@@ -189,7 +214,7 @@ def plot_metric(
 def main() -> None:
     """CLI entry point: render all four benchmark charts."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--study", choices=("turbulence", "correlated"),
+    parser.add_argument("--study", choices=("turbulence", "correlated", "adaptation"),
                         default="turbulence",
                         help="picks the default summary file, x-axis, and "
                              "output file prefix")
@@ -197,17 +222,27 @@ def main() -> None:
                         help="input summary CSV")
     args = parser.parse_args()
 
-    correlated = args.study == "correlated"
-    default_summary = "correlated_summary.csv" if correlated else "summary.csv"
-    table = load_summary(args.summary or str(RESULTS_DIR / default_summary))
-    for metric, title, ylabel, filename in METRIC_SPECS:
-        if correlated:
+    defaults = {"turbulence": "summary.csv",
+                "correlated": "correlated_summary.csv",
+                "adaptation": "adaptation_summary.csv"}
+    table = load_summary(args.summary or str(RESULTS_DIR / defaults[args.study]))
+    if args.study == "correlated":
+        for metric, title, ylabel, filename in METRIC_SPECS:
             plot_metric(table, metric, title, ylabel, f"correlated_{filename}",
                         x_order=COHERENCE_ORDER, x_labels=COHERENCE_LABELS,
                         x_axis_label="Fading coherence time "
                                      "(strong turbulence, C²ₙ = 1e-13 m⁻²ᐟ³)",
                         subtitle="10 episodes, shared seeds")
-        else:
+    elif args.study == "adaptation":
+        for metric, title, ylabel, filename in (*METRIC_SPECS,
+                                                *ADAPTATION_EXTRA_SPECS):
+            plot_metric(table, metric, title, ylabel, f"adaptation_{filename}",
+                        x_order=ADAPTATION_ORDER, x_labels=ADAPTATION_LABELS,
+                        x_axis_label="Environment config (disjoint topology, "
+                                     "C²ₙ = 1e-13 m⁻²ᐟ³)",
+                        subtitle="10 episodes, shared seeds")
+    else:
+        for metric, title, ylabel, filename in METRIC_SPECS:
             plot_metric(table, metric, title, ylabel, filename)
     plt.close("all")
 
