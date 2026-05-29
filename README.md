@@ -123,3 +123,8 @@ See [`ns3-rl-router/agent/README.md`](ns3-rl-router/agent/README.md) and
   onward; `ns3-rl-router/agent/ns3_env.py` overrides `reset()` to re-apply them and
   advance the seed.
 - ns3-ai's first build races its own protobuf codegen; the install script retries once.
+
+## License
+
+[GPL-2.0](LICENSE) — matching the ns-3 module sources, which carry GPLv2 headers per
+ns-3 convention.
