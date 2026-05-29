@@ -101,12 +101,19 @@ POLICIES = ("ppo", "ppo-transfer", "static-0", "static-1", "static-2", "static-3
 # orchestrator only evaluates its checkpoint). greedy-per is a scripted
 # reactive baseline: hold the current route, switch to the route with the
 # lowest summed link PER when it beats the current one by GREEDY_MARGIN.
-ALL_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "greedy-per", *POLICIES[1:])
+# ppo-stack is the Phase 7b policy-memory variant: PPO over
+# FRAME_STACK_K stacked observations (train and eval both wrap the env
+# in FlatFrameStack).
+ALL_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "greedy-per",
+                *POLICIES[1:])
 
-# Candidate routes as link indices into the observation (install order
-# (0,1) (1,2) (2,3) (3,4) (4,0) (0,2) (1,3); see sim/README.md):
-#   route 0: 0-2-3, route 1: 0-1-3, route 2: 0-4-3, route 3: 0-1-2-3
+# Candidate routes as link indices into the observation, per topology
+# (install orders in sim/README.md). Pentagon: (0,1) (1,2) (2,3) (3,4)
+# (4,0) (0,2) (1,3) with route 0: 0-2-3, 1: 0-1-3, 2: 0-4-3,
+# 3: 0-1-2-3. Disjoint: (0,3) (0,1) (1,3) (0,2) (2,3) (0,4) (4,3) with
+# route 0: 0-3, 1: 0-1-3, 2: 0-2-3, 3: 0-4-3.
 ROUTE_LINKS = ((5, 2), (0, 6), (4, 3), (0, 1, 2))
+DISJOINT_ROUTE_LINKS = ((0,), (1, 2), (3, 4), (5, 6))
 
 # Hysteresis for greedy-per [summed PER]: at ~12 packets per 0.1 s step a
 # sustained PER-sum improvement of 0.1 repays the flap penalty of 5 in
@@ -191,8 +198,19 @@ ADAPTATION_CONFIGS: dict[str, CoherenceConfig] = {
 }
 
 ADAPTATION_TRAIN_STEPS = 80_000
-ADAPTATION_POLICIES = ("ppo", "static-0", "static-1", "static-2", "static-3",
-                       "random", "aodv")
+ADAPTATION_POLICIES = ("ppo", "ppo-stack", "static-0", "static-1", "static-2",
+                       "static-3", "greedy-per", "random", "aodv")
+
+# Phase 7b iteration: the 80k "ppo" runs converged to constant-route
+# policies with fully collapsed entropy (H ~ 0.005 nats vs 1.386
+# uniform), so ppo-stack gives the policy memory — 8 stacked
+# observations cover 400 ms, most of a tau_L = 500 ms fade epoch at
+# 50 ms steps — and double the budget (the input is 8x wider). The
+# stacked variant is only meaningful where the channel has memory; the
+# orchestrator skips it in the iid control cell.
+FRAME_STACK_K = 8
+VARIANT_TRAIN_STEPS = {"ppo-stack": 160_000}
+STACK_SKIP_REGIMES = ("disjoint-iid-udp",)
 
 CSV_FIELDS = ("regime", "c2n", "policy", "episode", "sim_seed", "reward",
               "drops", "tx_pkts", "rx_pkts", "pdr", "mean_delay_ms",
@@ -366,13 +384,17 @@ def _load_agent(checkpoint: Path, obs_dim: int, n_actions: int):
     return agent
 
 
-def _action_fn_for(policy: str, env, seed: int) -> Callable[[np.ndarray], int]:
+def _action_fn_for(policy: str, env, seed: int,
+                   route_links: tuple = ROUTE_LINKS) -> Callable[[np.ndarray], int]:
     """Build the observation->action function for an env-driven policy.
 
     Args:
-        policy: One of ppo, ppo-transfer, static-K, random.
-        env: The gym env (for space sizes).
+        policy: One of ppo, ppo-transfer, static-K, greedy-per, random.
+        env: The gym env (for space sizes; already frame-stacked for
+            the ppo-stack variant).
         seed: RNG seed for the random policy.
+        route_links: Per-route link indices of the active topology
+            (for greedy-per).
 
     Returns:
         Callable mapping an observation to a discrete action.
@@ -394,7 +416,7 @@ def _action_fn_for(policy: str, env, seed: int) -> Callable[[np.ndarray], int]:
         def act_greedy_per(obs: np.ndarray) -> int:
             nonlocal current
             per = np.asarray(obs, dtype=np.float64).reshape(-1, 4)[:, 1]
-            costs = [float(sum(per[i] for i in links)) for links in ROUTE_LINKS]
+            costs = [float(sum(per[i] for i in links)) for links in route_links]
             best = int(np.argmin(costs))
             if costs[best] < costs[current] - GREEDY_MARGIN:
                 current = best
@@ -430,14 +452,25 @@ def eval_worker(args: argparse.Namespace) -> None:
                        episode_steps=args.episode_steps,
                        topology=args.topology,
                        traffic_protocol=args.traffic_protocol)
+    route_links = (DISJOINT_ROUTE_LINKS if args.topology == "disjoint"
+                   else ROUTE_LINKS)
+    stacked_env = None
     try:
         for policy in policies:
             worker_policy = policy
             if policy != "ppo-transfer" and policy.startswith("ppo"):
                 worker_policy = f"{policy}:{regime}"
-            action_fn = _action_fn_for(worker_policy, env, args.seed)
+            policy_env = env
+            if policy.startswith("ppo-stack"):
+                if stacked_env is None:
+                    from frame_stack import FlatFrameStack
+
+                    stacked_env = FlatFrameStack(env, FRAME_STACK_K)
+                policy_env = stacked_env
+            action_fn = _action_fn_for(worker_policy, policy_env, args.seed,
+                                       route_links)
             for ep in range(args.episodes):
-                metrics = run_env_episode(env, args.seed + ep, action_fn)
+                metrics = run_env_episode(policy_env, args.seed + ep, action_fn)
                 row = EpisodeRow(regime=regime, c2n=c2n, policy=policy, episode=ep,
                                  sim_seed=args.seed + ep, **metrics)
                 print(ROW_PREFIX + row.to_csv_line(), flush=True)
@@ -483,7 +516,8 @@ def _coherence_cli_args(coherence: CoherenceConfig | None,
 
 def train_regime_policy(regime: str, c2n: str, total_steps: int,
                         checkpoint: Path, train_seed: int,
-                        coherence: CoherenceConfig | None = None) -> None:
+                        coherence: CoherenceConfig | None = None,
+                        frame_stack: int = 1) -> None:
     """Train a fresh PPO policy for one sweep point via the train.py CLI.
 
     Runs in a subprocess because the ns3-ai shared-memory interface can
@@ -497,6 +531,7 @@ def train_regime_policy(regime: str, c2n: str, total_steps: int,
         train_seed: Global training seed (also the first episode's run
             number; disjoint from the evaluation seed range).
         coherence: Optional coherence sweep point (correlated study).
+        frame_stack: Observation stack depth (1 = no stacking).
 
     Raises:
         subprocess.CalledProcessError: If training fails.
@@ -511,6 +546,7 @@ def train_regime_policy(regime: str, c2n: str, total_steps: int,
          "--rollout-steps", "500", "--seed", str(train_seed),
          "--checkpoint-path", str(checkpoint),
          "--rewards-csv", str(rewards_csv),
+         "--frame-stack", str(frame_stack),
          *_coherence_cli_args(coherence)],
         cwd=_AGENT_DIR,
         stdout=subprocess.DEVNULL,
@@ -740,14 +776,22 @@ def main() -> None:
             f", tau {coherence.coherence_large}/{coherence.coherence_small}")
         print(f"\n=== {regime} (C2n={c2n}{detail}) ===", flush=True)
 
-        for variant in [p for p in policies
+        cell_policies = [p for p in policies
+                         if not (p == "ppo-stack" and regime in STACK_SKIP_REGIMES)]
+        for variant in [p for p in cell_policies
                         if p.startswith("ppo") and p != "ppo-transfer"]:
             checkpoint = (CHECKPOINTS_DIR /
                           f"{variant.replace('-', '_')}_{regime}.pt")
             if args.retrain or not checkpoint.exists():
+                steps = train_steps[regime]
+                if not args.quick:
+                    steps = args.train_steps or VARIANT_TRAIN_STEPS.get(
+                        variant, steps)
                 start = time.monotonic()
-                train_regime_policy(regime, c2n, train_steps[regime],
-                                    checkpoint, args.train_seed, coherence)
+                train_regime_policy(regime, c2n, steps,
+                                    checkpoint, args.train_seed, coherence,
+                                    frame_stack=(FRAME_STACK_K
+                                                 if variant == "ppo-stack" else 1))
                 elapsed = time.monotonic() - start
                 timings.append((regime, f"{variant}-train", elapsed))
                 print(f"[{regime}] {variant} training done in {elapsed:.0f}s",
@@ -755,7 +799,7 @@ def main() -> None:
             else:
                 print(f"[{regime}] reusing checkpoint {checkpoint}")
 
-        env_policies = [p for p in policies if p != "aodv"]
+        env_policies = [p for p in cell_policies if p != "aodv"]
         if env_policies:
             start = time.monotonic()
             rows = eval_env_policies(regime, env_policies, episodes,
