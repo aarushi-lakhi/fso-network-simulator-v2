@@ -329,6 +329,10 @@ Thumbs.db
 | 6a — Correlated sampler (math) | `math/correlated-fading-sampler` | ✅ Complete | Merged via PR #16 (2026-07-07); SI identity holds on correlated chains within 1% |
 | 6b — ns-3 correlated fading | `feat/correlated-fso-fading` | ✅ Complete | Merged via PR #17 (2026-07-07); τ=0 bit-identical to i.i.d., 9/9 tests |
 | 6c — Correlated-fading study | `feat/correlated-fading-study` | ✅ Complete | Answer: no — memory is necessary but not sufficient. PPO stays constant-route even at τ=500 ms / 50 ms steps; PER observation fixed route *selection*, not switching. Analysis in `benchmarks/results/README.md` |
+| CI | `chore/github-actions-ci` | 🔄 In progress | GitHub Actions: hermetic tests (prototype/agent/benchmarks) + ruff on every PR |
+| 7a — Adaptation-friendly environment | `feat/disjoint-routes-tcp` | ✅ Complete | Merged via PR #22 (2026-07-16); probe confirmed the per-episode best route flips on the disjoint mesh |
+| 7b — Policy memory | `feat/frame-stacked-obs` | ✅ Complete | Folded into 7c: `FlatFrameStack` wrapper (8 frames, 7 tests) — collapsed to constant-route exactly like plain PPO |
+| 7c — Adaptation study | `feat/adaptation-study` | ✅ Complete | Verdict: adaptation is now provably profitable (scripted greedy-PER beats best-static 8/10 in both correlated cells) and PPO still can't find it — collapses to constant routes, entropy ≈0.005 nats. Bottleneck moved from environment to optimizer. Analysis in `benchmarks/results/README.md` |
 
 **Status legend:** 🔲 Not started · 🔄 In progress · ✅ Complete · ⏸ Blocked
 
@@ -348,6 +352,7 @@ Thumbs.db
 | 2026-07-03 | ns3-ai natively on macOS — Docker/Lima fallback not needed | a-plus-b shared-memory example verified end-to-end on Apple Silicon. ns-3 toolchain pinned to python@3.11 (ns-3.40's `./ns3` breaks on 3.14; ns3-ai bindings want ≤3.11); ns-3.40 needs a small libc++ compat patch, shipped in `setup/patches/` |
 | 2026-07-03 | Phase 5 baselines: best-static route, random routing, and AODV — not HWMP | HWMP is 802.11s-specific and the topology is PointToPoint (per the 2026-05-26 decision), so it can't apply. AODV runs at the IP layer and works over p2p links; together with best-fixed-route and random, it gives classical-reactive, oracle-ish, and floor baselines for the trained PPO policy |
 | 2026-07-03 | Phase 6 (extension): temporally correlated fading via Gaussian copula AR(1) applied per Gamma component | Phase 5 showed i.i.d. 1 ms block fading makes hold-the-best-route optimal — RL had nothing to exploit. The copula construction (correlated normal → Φ → Gamma quantile, per component with separate large/small-scale coherence times) preserves the exact Gamma-Gamma marginal, so all Phase 2 validation still holds while coherence becomes tunable. 6c may add slow per-link C²ₙ drift (OU process) as the minutes-scale "weather" signal and/or faster decision steps |
+| 2026-07-13 | Phase 7 attacks adaptation *profitability* via environment changes first, policy memory second | Phase 6's mechanism finding: switching never pays because routes share links (one fade epoch degrades several routes at once) and UDP loss is linear in drop count. So 7a changes the environment — link-disjoint routes (a fade on one route leaves alternatives genuinely clean) and TCP traffic (drops compound through congestion control, making fade-dodging pay non-linearly) — before touching the policy. Frame-stacking (7b) only if 7a alone doesn't separate PPO from best-static. Same shared-seed study protocol as 6c |
 
 ---
 

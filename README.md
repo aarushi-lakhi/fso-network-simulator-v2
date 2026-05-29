@@ -1,5 +1,7 @@
 # FSO Network Simulator
 
+[![ci](https://github.com/aarushi-lakhi/fso-network-simulator-v2/actions/workflows/ci.yml/badge.svg)](https://github.com/aarushi-lakhi/fso-network-simulator-v2/actions/workflows/ci.yml)
+
 A cross-layer **Free-Space Optical (FSO) network simulator** that connects physical-layer
 atmospheric turbulence to network-layer routing decisions — and trains a deep RL agent to
 route around the weather.
@@ -74,9 +76,17 @@ AR(1) per Gamma component that preserves the exact Gamma-Gamma marginal while ma
 coherence time tunable — and re-ran the study. Channel memory turned out to be
 necessary but not sufficient: even at τ = 500 ms with 50 ms decision steps, PPO still
 converges to constant-route policies, because the per-episode variance dwarfs the
-margin a well-timed switch buys. Full analysis and what would change the answer
-(recurrent policies, disjoint routes, TCP traffic) in
-[`benchmarks/results/README.md`](benchmarks/results/README.md).
+margin a well-timed switch buys.
+
+**Phase 7 closed the loop** with a link-disjoint topology and TCP traffic, making
+switching *provably* profitable: a two-line scripted rule (pick the route with the
+best current per-link error rate) beats the best static route on 8 of 10 shared-seed
+episodes in both correlated cells (+13.8 pp PDR under UDP, +75% goodput under TCP).
+PPO — even frame-stacked at double budget — still collapses to a constant route with
+near-zero policy entropy. The bottleneck is no longer the environment; it's the
+optimizer: on-policy PPO under episode-return noise of ~25% of the mean retreats to
+the safest constant action. Full paired analysis, switching statistics, and the
+oracle gap in [`benchmarks/results/README.md`](benchmarks/results/README.md).
 
 ## Repository layout
 

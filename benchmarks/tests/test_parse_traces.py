@@ -11,8 +11,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from parse_traces import (  # noqa: E402
+    format_paired,
     format_table,
     load_raw,
+    paired_ppo_vs_best_static,
     summarize,
     write_summary,
 )
@@ -128,6 +130,103 @@ def test_correlated_study_labels_sort_after_regimes(tmp_path: Path) -> None:
     best = next(e for e in summary
                 if e["regime"] == "tau500-100" and e["policy"] == "best-static")
     assert best["detail"] == "route=2"
+
+
+EXTENDED_HEADER = CSV_HEADER + ",goodput_mbps,retx,switches"
+
+# Phase 7 adaptation rows: PPO switches routes and beats static-0 on
+# seed 100, loses on 101, matches nothing byte-identically.
+ADAPTATION_ROWS = [
+    "disjoint-tau500-tcp,1e-13,ppo,0,100,-500.0,400,2440,2000,0.820,0.20,1.64,30,4",
+    "disjoint-tau500-tcp,1e-13,ppo,1,101,-720.0,600,2440,1800,0.738,0.22,1.48,55,2",
+    "disjoint-tau500-tcp,1e-13,static-0,0,100,-600.0,500,2440,1900,0.779,0.21,1.56,40,0",
+    "disjoint-tau500-tcp,1e-13,static-0,1,101,-700.0,580,2440,1820,0.746,0.21,1.49,50,0",
+    "disjoint-tau500-tcp,1e-13,static-1,0,100,-900.0,800,2440,1600,0.656,0.25,1.31,80,0",
+    "disjoint-tau500-tcp,1e-13,static-1,1,101,-950.0,840,2440,1580,0.648,0.26,1.30,85,0",
+]
+
+
+def test_load_raw_defaults_missing_phase7_columns(raw_csv: Path) -> None:
+    """Older raw CSVs (no goodput/retx/switches) load with zeros."""
+    rows = load_raw(raw_csv)
+    assert rows[0]["goodput_mbps"] == 0.0
+    assert rows[0]["retx"] == 0
+    assert rows[0]["switches"] == 0
+
+
+def test_load_raw_parses_phase7_columns(tmp_path: Path) -> None:
+    path = tmp_path / "adaptation_raw.csv"
+    path.write_text("\n".join([EXTENDED_HEADER, *ADAPTATION_ROWS]) + "\n")
+    rows = load_raw(path)
+    ppo0 = rows[0]
+    assert ppo0["goodput_mbps"] == pytest.approx(1.64)
+    assert ppo0["retx"] == 30
+    assert ppo0["switches"] == 4
+
+
+def test_summarize_includes_phase7_metrics(tmp_path: Path) -> None:
+    path = tmp_path / "adaptation_raw.csv"
+    path.write_text("\n".join([EXTENDED_HEADER, *ADAPTATION_ROWS]) + "\n")
+    summary = summarize(load_raw(path))
+    ppo = next(e for e in summary if e["policy"] == "ppo")
+    assert ppo["goodput_mbps_mean"] == pytest.approx(1.56)
+    assert ppo["retx_mean"] == pytest.approx(42.5)
+    assert ppo["switches_mean"] == pytest.approx(3.0)
+    table = format_table(summary, extended=True)
+    assert "goodput" in table and "switches" in table
+
+
+def test_adaptation_labels_sort_after_coherence_configs(tmp_path: Path) -> None:
+    path = tmp_path / "raw.csv"
+    rows = [
+        "disjoint-tau500-udp,1e-13,ppo,0,100,-500.0,450,2440,2000,0.820,0.20",
+        "disjoint-iid-udp,1e-13,ppo,0,100,-730.0,675,2440,1770,0.725,0.18",
+    ]
+    path.write_text("\n".join([CSV_HEADER, *rows]) + "\n")
+    labels = [e["regime"] for e in summarize(load_raw(path))]
+    assert labels.index("disjoint-iid-udp") < labels.index("disjoint-tau500-udp")
+
+
+def test_paired_comparison_pairs_by_seed(tmp_path: Path) -> None:
+    path = tmp_path / "adaptation_raw.csv"
+    path.write_text("\n".join([EXTENDED_HEADER, *ADAPTATION_ROWS]) + "\n")
+    results = paired_ppo_vs_best_static(load_raw(path))
+    assert len(results) == 1
+    row = results[0]
+    assert row["regime"] == "disjoint-tau500-tcp"
+    assert row["best_route"] == "0"  # static-0 mean -650 beats static-1 -925
+    assert row["n"] == 2
+    # deltas: seed 100: -500 - (-600) = +100; seed 101: -720 - (-700) = -20
+    assert row["reward_delta_mean"] == pytest.approx(40.0)
+    assert row["wins"] == 1
+    assert row["ties"] == 0
+    assert row["losses"] == 1
+    assert row["switches_mean"] == pytest.approx(3.0)
+    assert row["switches_max"] == 4
+    assert row["identical_route"] == ""
+
+
+def test_paired_comparison_flags_constant_route_policy(tmp_path: Path) -> None:
+    """A PPO that reproduces a static route exactly is fingerprinted."""
+    path = tmp_path / "raw.csv"
+    rows = [
+        "strong,1e-13,ppo,0,100,-800.0,700,2440,1700,0.697,0.25",
+        "strong,1e-13,ppo,1,101,-820.0,720,2440,1690,0.693,0.27",
+        "strong,1e-13,static-0,0,100,-1000.0,900,2440,1500,0.615,0.30",
+        "strong,1e-13,static-0,1,101,-1040.0,920,2440,1480,0.607,0.32",
+        "strong,1e-13,static-1,0,100,-800.0,700,2440,1700,0.697,0.25",
+        "strong,1e-13,static-1,1,101,-820.0,720,2440,1690,0.693,0.27",
+    ]
+    path.write_text("\n".join([CSV_HEADER, *rows]) + "\n")
+    results = paired_ppo_vs_best_static(load_raw(path))
+    row = results[0]
+    assert row["identical_route"] == "1"
+    assert row["ties"] == 2
+    assert row["reward_delta_mean"] == 0.0
+    text = format_paired(results)
+    assert "route 1" in text
+    assert "2/2" not in text  # W/T/L renders as 0/2/0
+    assert "0/2/0" in text
 
 
 def test_single_episode_std_is_zero(tmp_path: Path) -> None:

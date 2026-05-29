@@ -240,6 +240,7 @@ class TestGammaGammaSample:
         samples = gamma_gamma_sample(alpha, beta, self.N_LARGE, rng)
         si = scintillation_index(alpha, beta)
         assert si > 0.5, f"Strong turbulence SI should be > 0.5, got {si:.4f}"
+        assert samples.std() > 0.9, f"Expected heavy spread, got std={samples.std():.4f}"
 
     def test_reproducible_with_seed(self) -> None:
         """Same seed → identical sample array."""
