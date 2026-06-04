@@ -100,12 +100,13 @@ signal-to-noise ratio rationally collapses onto the best constant action.
 The correlated channel makes adaptation *possible*, not *profitable at
 this margin*.
 
-What would give adaptation a real edge (future work, in rough order of
-expected payoff): a recurrent policy or frame-stacked observations so fade
-trajectories are visible, not just snapshots; disjoint routes so a fade on
-one route leaves an alternative genuinely clean; TCP traffic, where drops
-compound through congestion control and dodging a fade epoch pays
-non-linearly; and a lower flap penalty during exploration.
+What would give adaptation a real edge (written as future work at the
+time; **all of it was implemented and tested in Phase 7 below**): a
+recurrent policy or frame-stacked observations so fade trajectories are
+visible, not just snapshots; disjoint routes so a fade on one route leaves
+an alternative genuinely clean; TCP traffic, where drops compound through
+congestion control and dodging a fade epoch pays non-linearly; and a lower
+flap penalty during exploration.
 
 ## Phase 7: the adaptation study
 
