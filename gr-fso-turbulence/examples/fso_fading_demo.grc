@@ -96,11 +96,14 @@ blocks:
     alias: ''
     coherence_samples: '1000'
     comment: 'Moderate turbulence, 1 km link. coherence_samples = samp_rate x 1
-      ms.'
+      ms; correlated windows (tau_large 100 ms, tau_small 10 ms).'
     distance: '1000.0'
     maxoutbuf: '0'
     minoutbuf: '0'
+    sample_rate: samp_rate
     seed: None
+    tau_large: 100e-3
+    tau_small: 10e-3
     wavelength: 1550e-9
   states:
     bus_sink: false
