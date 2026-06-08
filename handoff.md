@@ -1,245 +1,63 @@
 # FSO Network Simulator — Agent Handoff Document
 
-> **Purpose:** Captures conversation context, decisions, preferences, and current state for
-> seamless continuity when picking up this project on a new machine or in a new session.
-> Read this alongside `plan.md`, which has the full technical plan and phase tracker.
+> **Purpose:** continuity notes for picking this project up in a new session or on a new
+> machine. Read alongside `plan.md` (phase tracker, decisions log, conventions) and
+> `README.md` (architecture, results, reproduction). This file carries only what those
+> two don't: working style, environment quirks, and the open threads.
 >
-> Last updated: 2026-07-03
+> Last updated: 2026-07-17 — **all seven phases complete**, `main` == `dev` at the
+> phase 7 release (PR #24).
 
 ---
 
-## Project in One Paragraph
+## Project State in One Paragraph
 
-Building a cross-layer Free-Space Optical (FSO) network simulator. The physics layer is a
-custom GNU Radio OOT module that implements Gamma-Gamma atmospheric turbulence fading. Those
-physical-layer statistics feed into a custom ns-3 propagation loss model (a piece the original
-plan was missing). On top of that sits a Deep Reinforcement Learning agent (PyTorch PPO via
-ns3-ai) that reroutes mesh traffic proactively when it detects signal variance, minimising
-packet loss and eliminating redundant retransmissions. The user's goals are equally portfolio
-and academic — it needs to be both technically rigorous and visually impressive on GitHub.
+The simulator is finished and self-documenting: Gamma-Gamma turbulence math validated in
+Python (`prototype/`), mirrored into a GNU Radio fading block (`gr-fso-turbulence/`) and
+a custom ns-3 channel module (`ns3-fso-channel/`, including Phase 6's correlated-fading
+process), bridged to a PyTorch PPO agent through ns3-ai (`ns3-rl-router/`), and
+benchmarked across three studies (`benchmarks/results/README.md`). The scientific arc
+ended with a sharp negative result: adaptation is provably profitable in the Phase 7
+environment (a scripted greedy-PER rule beats the best static route 8/10 episodes) and
+PPO still collapses to constant-route policies — the bottleneck is the optimizer, not
+the environment.
 
----
+## Working Style (unchanged — follow strictly)
 
-## Current Git State
+- **Never push without explicit approval; before any push/PR give a step-by-step
+  breakdown** (commands, commit messages, PR title/description) and wait for a yes.
+- Feature branches → PR into `dev`; **no squash merges**; small intentional commits and
+  PRs (stacked branches welcome). Cut `main` only from a `release/*` branch — never with
+  `dev` as the PR head (GitHub auto-delete once nuked `dev`; see plan.md).
+- Conventional Commits, **no `Co-Authored-By` trailers**. PR descriptions: a few casual
+  notes, no headers/bolding/text walls. Sparse, purposeful code comments.
+- `plan.md` is the living source of truth — update the tracker and decisions log as
+  things change. Report results honestly, including losses.
 
-```
-origin/main      ← stable; two commits (init + branch naming fix)
-origin/dev       ← integration branch; mirrors main
-origin/feat/gamma-gamma-sampler  ← pushed; checked out locally on the new machine
-```
+## Environment (macOS, Apple Silicon)
 
-**Commits on `feat/gamma-gamma-sampler` (ahead of dev by 3):**
-```
-a7621fa  docs: add agent handoff document for laptop migration
-eaa0728  test(gamma-gamma): full pytest suite with SI identity validation
-42ebc00  feat(gamma-gamma): implement Gamma-Gamma atmospheric turbulence model
-f2e0b79  docs(plan): update branch naming to industry-standard convention   ← on main/dev
-78db0b7  chore: initialize repo with plan and gitignore                     ← on main/dev
-```
+- Toolchain lives outside the repo at `~/fso-tools/` (ns-3.40 + ns3-ai; see `setup/`).
+  `setup/verify_env.sh` checks everything (11 PASS = healthy).
+- The ns-3 side is pinned to **python@3.11** (`./ns3` breaks on 3.14; ns3-ai bindings
+  are 3.11). GNU Radio uses Homebrew's default python. Activate the agent venv
+  (3.11, `ns3-rl-router` requirements + the two ns3ai editable packages) for anything
+  that spawns ns-3 — `env python3` must resolve to 3.11.
+- `setup/link_fso_modules.sh` links the repo's ns-3 modules into the tree;
+  `--unlink` restores it (then build only the `ai` target — contrib/ai's rate-control
+  example has a known pre-existing build failure on ns-3.40).
+- Hard-won pitfalls: ns3-ai allows **one Experiment per process** (run env-owning
+  phases in subprocesses); upstream `Ns3Env.reset()` drops settings (our `FsoNs3Env`
+  fixes it — always use it); the default shell is zsh, which does **not** word-split
+  unquoted variables; long study runs should persist results incrementally.
+- GitHub remote: `https://github.com/aarushi-lakhi/fso-network-simulator-v2.git`.
+  CI (GitHub Actions) runs the hermetic test suites + ruff on every PR.
 
-**Laptop migration is complete.** The branch was pushed from the old machine and the repo
-now lives at `~/fso-network-simulator-v2` on the new laptop (macOS, Apple Silicon).
+## Open Threads (a new chapter, not unfinished business)
 
----
-
-## What Has Been Built: Phase 2a (Complete, Not Yet PR'd)
-
-All files live in `prototype/`.
-
-### Files Created
-
-| File | Purpose |
-|------|---------|
-| `prototype/gamma_gamma.py` | Core math — Gamma-Gamma model, BER analysis |
-| `prototype/turbulence_plots.py` | Three publication-quality plots |
-| `prototype/tests/test_gamma_gamma.py` | 39 pytest tests |
-| `prototype/requirements.txt` | numpy, scipy, matplotlib, pytest, pytest-cov |
-| `prototype/tests/__init__.py` | Makes tests/ a package |
-
-### What `gamma_gamma.py` Implements
-
-- **`TurbulenceParams`** — validated dataclass (C²_n, wavelength, distance); raises `ValueError` on bad input
-- **`rytov_variance(C2n, wavelength, distance)`** — σ²_R = 1.23 × C²_n × k^(7/6) × L^(11/6)
-- **`alpha_beta_from_rytov(sigma2_R)`** — Andrews & Phillips (2005) Eqs. 8.16–8.17
-- **`gamma_gamma_sample(alpha, beta, n_samples, rng)`** — product-of-Gammas, E[I]=1 normalised
-- **`scintillation_index(alpha, beta)`** — closed-form: 1/α + 1/β + 1/(αβ)
-- **`empirical_scintillation_index(samples)`** — for sampler validation
-- **`ber_ook_fading(snr_db_range, alpha, beta, ...)`** — Monte Carlo average BER
-- **`ber_awgn_baseline(snr_db_range)`** — analytical AWGN reference
-
-### What `turbulence_plots.py` Generates
-
-Run `python turbulence_plots.py` from `prototype/` to write to `prototype/plots/`:
-1. `fading_traces.png` — irradiance time-series for weak/moderate/strong turbulence
-2. `ber_vs_snr.png` — BER vs SNR, fading vs AWGN baseline
-3. `scintillation_map.png` — SI vs C²_n across multiple link distances
-
-### Key Test (the mathematical validation)
-
-`test_scintillation_index_identity` in `test_gamma_gamma.py` — verifies the sampler
-produces distributions where the empirical SI matches the closed-form SI = 1/α + 1/β + 1/(αβ)
-within 5% on 500k samples. If this test passes, the Gamma-Gamma math is correct.
-
-### How to Run
-
-```bash
-cd prototype/
-python3 -m venv .venv && source .venv/bin/activate   # macOS / Linux
-pip install -r requirements.txt
-
-# Tests
-pytest tests/ -v --cov=gamma_gamma --cov-report=term-missing
-
-# Plots
-python turbulence_plots.py
-```
-
----
-
-## Next Steps (in order)
-
-1. ~~**Push `feat/gamma-gamma-sampler`**~~ — ✅ done; branch is on origin.
-
-2. ~~**Run the test suite**~~ — ✅ done 2026-07-03 on macOS: 39 passed, 99% coverage.
-   Two tests had physically incorrect assertions (fixed on the branch): the strong-regime
-   Rytov spot-check expected σ²_R > 5 where the correct closed-form value at 1 km is ≈ 1.99
-   (strong regime starts at σ²_R > 1), and the AWGN BER test expected ~0.5 at 0 dB where
-   ½·erfc(√½) ≈ 0.1587 is correct (BER → 0.5 only as SNR → −∞). The production math in
-   `gamma_gamma.py` was verified correct by hand — only test expectations changed.
-
-3. ~~**Run `turbulence_plots.py`**~~ — ✅ done 2026-07-03: all three plots reviewed and
-   physically sensible (heavy-tailed strong-turbulence fades, fading-induced BER slope
-   flattening, SI saturation near ~1.2).
-
-4. **Open PR: `feat/gamma-gamma-sampler` → `dev`** — ✅ opened 2026-07-03 (PR #1);
-   user reviews the diff and merges (no squash — see working style below).
-
-5. **Start Phase 1 (`chore/dev-environment`)** — macOS setup: GNU Radio 3.10 (Homebrew or
-   conda) + ns-3.40 (builds natively with CMake/clang). Verify ns3-ai's shared-memory
-   interface works on macOS early — it is primarily tested on Linux; fallback is a Docker
-   or Lima Ubuntu 22.04 environment. This can be worked on in parallel with step 3/4.
-
-6. **Start Phase 2b (`feat/gr-fso-fading-block`)** — GNU Radio OOT block; depends on
-   Phase 1 environment being set up and Phase 2a being merged.
-
----
-
-## Working Style & Preferences (Important for the Next Agent)
-
-- **Never push to remote without explicit user approval.** The user reviews and tests locally
-  first. Ask before every push — even if they've approved it once before, ask again.
-
-- **Never push to `main` or `dev` directly.** All changes go through feature branches → PR.
-
-- **Branch naming convention:** `<type>/<descriptive-name>` (e.g. `feat/gamma-gamma-sampler`,
-  `chore/dev-environment`). No phase numbers in branch names — they describe what the code
-  does, not when.
-
-- **Commit message style:** Conventional Commits — `<type>(<scope>): <description>`.
-  **Do NOT add `Co-Authored-By` trailers** (policy changed 2026-07-03; earlier commits
-  carry the trailer, new ones must not).
-
-- **No squash merges** (policy 2026-07-03). Merge PRs with a merge commit or rebase-merge
-  so the real commits are preserved.
-
-- **Small, intentional commits and PRs.** No huge PRs or huge commits with lots of
-  changes. Stacked branches (branching off another feature branch) are fine — preferred,
-  even — if that's what it takes to keep each PR small. (PR #1 was grandfathered in.)
-
-- **PR descriptions:** a few straightforward, casual notes plus any important details.
-  No headers, bolding, or large chunks of text.
-
-- **Code comments:** sparse and purposeful — no heavy AI-generated-looking commenting.
-  Docstrings on public functions stay (per plan.md Python standards); inline comments
-  only where something non-obvious needs explaining.
-
-- **Two agents in parallel:** Safe when working in different directories. The plan defines
-  which branches touch which directories — check before running concurrent agents.
-
-- **`plan.md` is the living source of truth.** Update the phase tracker table and the
-  "Key Technical Decisions" log whenever something changes.
-
----
-
-## Key Corrections Made to the Original Gemini Plan
-
-These are important context — the user started with a Gemini-generated plan that had gaps.
-Don't revert to the original plan's approach on these items.
-
-| Original Plan | Corrected Approach | Why |
-|--------------|-------------------|-----|
-| Used `ns3-gym` | Use `ns3-ai` | ns3-gym abandoned ~2021; ns3-ai uses shared memory (10-100x faster), actively maintained |
-| 802.11s Wi-Fi mesh topology | Custom `PointToPointHelper` FSO topology | FSO is point-to-point laser, not broadcast RF — wrong propagation model |
-| No ns-3 FSO channel model | Add Phase 3: `GammaGammaFsoLossModel` custom `PropagationLossModel` | ns-3 has no FSO model; without this, the two phases are disconnected |
-| Included `gr-osmosdr` | Omit entirely | SDR hardware package; irrelevant without physical hardware attached |
-| `feature/phase<N>-<name>` branch naming | `<type>/<descriptive-name>` | Industry standard; phase numbers in names rot as the plan changes |
-| No explicit PHY→network bridge | Phase 2a outputs parameterise Phase 3 | Without this link, GNU Radio and ns-3 are two unrelated simulations |
-
----
-
-## The Architecture (What Makes This Coherent)
-
-```
-Phase 2a: Python Prototype
-  gamma_gamma.py → fading coefficient time-series, BER curves, α/β/C²_n tables
-        │
-        │ (parameters exported)
-        ▼
-Phase 2b: GNU Radio OOT Block (gr-fso-turbulence)
-  fso_fading_channel.py → multiplies incoming IQ samples by Gamma-Gamma coefficients
-        │
-        │ (same physical parameters)
-        ▼
-Phase 3: ns-3 Custom Propagation Model
-  GammaGammaFsoLossModel → C++ PropagationLossModel consuming Gamma-Gamma stats
-  + Beer-Lambert atmospheric extinction: L_atm = exp(-σ_ext × d)
-  + PointToPoint FSO 5-node topology (NOT Wi-Fi mesh)
-        │
-        ▼
-Phase 4: DRL Routing Agent
-  ns3-ai shared-memory interface → PyTorch PPO agent
-  State: per-link SNR, drop rate, scintillation index, queue depth
-  Action: next-hop selection
-  Reward: -dropped_packets - latency + energy_saved - route_flapping
-        │
-        ▼
-Phase 5: Benchmarks
-  Trained PPO vs AODV vs HWMP across weak/moderate/strong C²_n sweep
-```
-
----
-
-## Core Math Reference (quick lookup)
-
-**Gamma-Gamma PDF:**
-```
-f(I; α, β) = [2(αβ)^((α+β)/2)] / [Γ(α)Γ(β)] × I^((α+β)/2 - 1) × K_{α-β}(2√(αβI))
-```
-
-**Rytov variance:** `σ²_R = 1.23 × C²_n × k^(7/6) × L^(11/6)`  where `k = 2π/λ`
-
-**α, β from σ²_R (plane wave):**
-```
-α = 1 / [exp(0.49 σ²_R / (1 + 1.11 σ_R^(12/5))^(7/6)) - 1]
-β = 1 / [exp(0.51 σ²_R / (1 + 0.69 σ_R^(12/5))^(5/6)) - 1]
-```
-
-**Scintillation index identity (sampler validation):**  `SI = 1/α + 1/β + 1/(αβ)`
-
-**C²_n regimes:** Weak ≈ 10⁻¹⁷, Moderate ≈ 10⁻¹⁵, Strong ≈ 10⁻¹³ m^(-2/3)
-
----
-
-## Environment Notes
-
-- Development environment: **macOS (Apple Silicon / arm64)** — the user's new laptop is a Mac,
-  replacing the old Windows 11 + WSL2 setup. All WSL2-specific instructions are obsolete.
-- The Python prototype (`prototype/`) runs on native macOS Python (Homebrew Python 3).
-- Target: **GNU Radio 3.10** — install via Homebrew (`brew install gnuradio`) or conda
-  (`conda install -c conda-forge gnuradio`).
-- Target: **ns-3.40** (pin with `git checkout ns-3.40` after cloning) — builds natively on
-  macOS with CMake + clang.
-- **Risk to verify early in Phase 1:** ns3-ai's shared-memory bridge is primarily developed
-  and tested on Linux. If it misbehaves on macOS, fall back to a Docker or Lima Ubuntu 22.04
-  environment for Phases 4–5.
-- GitHub remote: `https://github.com/aarushi-lakhi/fso-network-simulator.git`
+1. **Why does on-policy PPO collapse to constant routes under ~25% return noise, and
+   what fixes it?** Cheap experiments with the existing harness: advantage/reward
+   normalization variants; behavior-cloning the scripted greedy-PER teacher then
+   fine-tuning with PPO; off-policy methods (DQN/SAC-discrete). Each is a small
+   `agent/` branch plus one `--study` cell.
+2. PHY-in-the-loop: wire the GNU Radio block's output into the ns-3 channel for true
+   cross-layer simulation (currently the layers share parameters, not samples).
