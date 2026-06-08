@@ -14,6 +14,10 @@ independent Gamma-distributed random processes:
 This two-parameter model accurately covers weak through strong turbulence
 regimes and is the standard for FSO link performance analysis.
 
+Temporal correlation (Phase 6a): correlated_gamma_gamma_sample() adds
+tunable coherence times via a Gaussian copula AR(1) process per Gamma
+component, preserving the exact Gamma-Gamma marginal.
+
 Typical usage:
     >>> params = TurbulenceParams(C2n=1e-15, wavelength=1550e-9, distance=1000.0)
     >>> alpha, beta = params.alpha_beta()
@@ -27,7 +31,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
+from scipy.signal import lfilter
 from scipy.special import erfc
+from scipy.stats import gamma as gamma_dist
+from scipy.stats import norm
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +299,180 @@ def empirical_scintillation_index(samples: np.ndarray) -> float:
     mean_I = np.mean(samples)
     mean_I2 = np.mean(samples ** 2)
     return mean_I2 / mean_I ** 2 - 1.0
+
+
+# ---------------------------------------------------------------------------
+# Temporally correlated sampling (Gaussian copula AR(1))
+# ---------------------------------------------------------------------------
+
+
+def ar1_coefficient(dt: float, tau: float) -> float:
+    """Compute the AR(1) coefficient ρ for a given coherence time.
+
+    The latent Gaussian process underlying each Gamma component decorrelates
+    exponentially with the atmospheric coherence time τ:
+
+        ρ = exp(−Δt / τ)
+
+    so that Corr[g_t, g_{t+k}] = ρᵏ = exp(−kΔt/τ). τ = 0 is taken as the
+    memoryless limit ρ = 0 (each step is an independent draw).
+
+    Args:
+        dt: Sample interval Δt [s]. Must be > 0.
+        tau: Coherence time τ [s]. Must be ≥ 0; τ = 0 → ρ = 0 (i.i.d.).
+
+    Returns:
+        AR(1) coefficient ρ ∈ [0, 1).
+
+    Raises:
+        ValueError: If dt is not positive or tau is negative.
+    """
+    if dt <= 0:
+        raise ValueError(f"dt must be positive, got {dt}")
+    if tau < 0:
+        raise ValueError(f"tau must be non-negative, got {tau}")
+    if tau == 0.0:
+        return 0.0
+    return float(np.exp(-dt / tau))
+
+
+def _correlated_gamma_component(
+    shape: float,
+    n_samples: int,
+    rho: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Generate a stationary Gamma(shape, 1/shape) series with AR(1) copula memory.
+
+    Latent standard-normal AR(1) process (stationary initialisation):
+        g_0 ~ N(0, 1),   g_{t+1} = ρ·g_t + √(1−ρ²)·ε_t,   ε_t ~ N(0, 1)
+
+    mapped through the Gaussian copula to the exact Gamma marginal:
+        u_t = Φ(g_t),   component_t = F⁻¹_Gamma(u_t; shape, scale=1/shape)
+
+    Since g_t is exactly N(0, 1) at every t, the marginal of component_t is
+    exactly Gamma(shape, 1/shape) at every t — only the temporal dependence
+    is introduced by ρ.
+    """
+    eps = rng.standard_normal(n_samples)
+
+    # Innovation sequence: g_0 = ε_0 (stationary start), then scaled by √(1−ρ²)
+    innovations = np.sqrt(1.0 - rho ** 2) * eps
+    innovations[0] = eps[0]
+
+    # g_t = ρ·g_{t−1} + innovation_t, computed as an IIR filter (vectorised)
+    latent = lfilter([1.0], [1.0, -rho], innovations)
+
+    # Copula transform; clip guards against Φ(g) rounding to exactly 0 or 1
+    u = np.clip(norm.cdf(latent), 1e-16, 1.0 - 1e-16)
+    return gamma_dist.ppf(u, a=shape, scale=1.0 / shape)
+
+
+def correlated_gamma_gamma_sample(
+    alpha: float,
+    beta: float,
+    n_samples: int,
+    dt: float,
+    tau_large: float,
+    tau_small: float,
+    rng: Optional[np.random.Generator] = None,
+) -> np.ndarray:
+    """Generate a temporally correlated Gamma-Gamma irradiance time series.
+
+    Extends gamma_gamma_sample() with tunable temporal coherence via a
+    Gaussian copula AR(1) construction applied independently to each Gamma
+    component:
+
+        X_t = F⁻¹_Gamma(Φ(gX_t); α, 1/α)   with gX an AR(1), ρ_X = exp(−Δt/τ_large)
+        Y_t = F⁻¹_Gamma(Φ(gY_t); β, 1/β)   with gY an AR(1), ρ_Y = exp(−Δt/τ_small)
+        I_t = X_t · Y_t
+
+    Because each copula transform is exact, the stationary marginal of I_t is
+    EXACTLY the same Gamma-Gamma distribution as the i.i.d. sampler: E[I] = 1
+    and SI = 1/α + 1/β + 1/(αβ) still hold at every time step. Only the
+    temporal autocorrelation changes. τ_large = τ_small = 0 recovers i.i.d.
+    behaviour. Note the autocorrelation of I_t is NOT exactly exp(−kΔt/τ):
+    the nonlinear quantile transform reshapes the latent exponential decay
+    (it stays monotone in lag and in τ).
+
+    The two-scale structure follows the physical picture in Andrews &
+    Phillips (2005): large eddies (X, refractive) evolve more slowly than
+    small eddies (Y, diffractive), so typically τ_large > τ_small.
+
+    Args:
+        alpha: Large-scale scintillation parameter. Must be > 0.
+        beta: Small-scale scintillation parameter. Must be > 0.
+        n_samples: Number of time samples to generate. Must be > 0.
+        dt: Sample interval Δt [s]. Must be > 0.
+        tau_large: Coherence time [s] of the large-scale component X.
+            Must be ≥ 0; 0 → memoryless (i.i.d.) X.
+        tau_small: Coherence time [s] of the small-scale component Y.
+            Must be ≥ 0; 0 → memoryless (i.i.d.) Y.
+        rng: NumPy random Generator for reproducibility. If None, a fresh
+            default_rng() is used (not reproducible across calls).
+
+    Returns:
+        np.ndarray of shape (n_samples,): irradiance time series I_t sampled
+        every dt seconds. All values > 0, E[I] ≈ 1.
+
+    Raises:
+        ValueError: If alpha, beta, n_samples, or dt are not positive, or if
+            either coherence time is negative.
+
+    Example:
+        >>> rng = np.random.default_rng(seed=42)
+        >>> series = correlated_gamma_gamma_sample(
+        ...     alpha=4.0, beta=1.7, n_samples=10_000,
+        ...     dt=1e-3, tau_large=100e-3, tau_small=10e-3, rng=rng)
+        >>> assert abs(series.mean() - 1.0) < 0.1
+    """
+    if alpha <= 0:
+        raise ValueError(f"alpha must be positive, got {alpha}")
+    if beta <= 0:
+        raise ValueError(f"beta must be positive, got {beta}")
+    if n_samples <= 0:
+        raise ValueError(f"n_samples must be positive, got {n_samples}")
+
+    rho_large = ar1_coefficient(dt, tau_large)  # validates dt and tau_large
+    rho_small = ar1_coefficient(dt, tau_small)
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    large_scale = _correlated_gamma_component(alpha, n_samples, rho_large, rng)
+    small_scale = _correlated_gamma_component(beta, n_samples, rho_small, rng)
+
+    return large_scale * small_scale
+
+
+def empirical_autocorrelation(samples: np.ndarray, lag: int) -> float:
+    """Compute the lag-k autocorrelation of a time series empirically.
+
+    r_k = Σ_t (I_t − Ī)(I_{t+k} − Ī) / Σ_t (I_t − Ī)²
+
+    Used to validate the temporal structure of correlated_gamma_gamma_sample():
+    r_k must decay with k and increase with the coherence times.
+
+    Args:
+        samples: Time-series array. Must have more than `lag` elements.
+        lag: Lag k in samples. Must be ≥ 0.
+
+    Returns:
+        Empirical autocorrelation r_k ∈ [−1, 1] (r_0 = 1).
+
+    Raises:
+        ValueError: If lag is negative or not smaller than len(samples).
+    """
+    if lag < 0:
+        raise ValueError(f"lag must be non-negative, got {lag}")
+    if lag >= len(samples):
+        raise ValueError(f"lag ({lag}) must be < len(samples) ({len(samples)})")
+
+    centered = samples - samples.mean()
+    denom = np.sum(centered ** 2)
+    if lag == 0:
+        return 1.0
+    return float(np.sum(centered[:-lag] * centered[lag:]) / denom)
 
 
 # ---------------------------------------------------------------------------
