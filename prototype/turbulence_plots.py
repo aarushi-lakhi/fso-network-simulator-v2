@@ -1,10 +1,11 @@
 """
 Visualization tools for Gamma-Gamma FSO turbulence analysis.
 
-Generates three publication-quality plots saved to prototype/plots/:
-    1. fading_traces.png     — time-series irradiance under weak/moderate/strong turbulence
-    2. ber_vs_snr.png        — BER vs SNR for fading vs AWGN baseline
-    3. scintillation_map.png — scintillation index across C²_n and link distance
+Generates publication-quality plots saved to prototype/plots/:
+    1. fading_traces.png            — time-series irradiance under weak/moderate/strong turbulence
+    2. ber_vs_snr.png               — BER vs SNR for fading vs AWGN baseline
+    3. scintillation_map.png        — scintillation index across C²_n and link distance
+    4. correlated_fading_traces.png — correlated fading for increasing coherence times
 
 Run directly:
     python turbulence_plots.py
@@ -30,6 +31,8 @@ from gamma_gamma import (
     alpha_beta_from_rytov,
     ber_awgn_baseline,
     ber_ook_fading,
+    correlated_gamma_gamma_sample,
+    empirical_autocorrelation,
     gamma_gamma_sample,
     rytov_variance,
     scintillation_index,
@@ -334,16 +337,114 @@ def plot_scintillation_map(
 
 
 # ---------------------------------------------------------------------------
+# Plot 4: Correlated fading time-series (Phase 6a)
+# ---------------------------------------------------------------------------
+
+
+def plot_correlated_fading_traces(
+    n_samples: int = 2_000,
+    dt_s: float = 1e-3,
+    tau_large_values_s: Optional[list[float]] = None,
+    distance_m: float = 1_000.0,
+    wavelength_m: float = 1550e-9,
+    seed: int = 42,
+    save: bool = True,
+    show: bool = False,
+) -> plt.Figure:
+    """Plot correlated Gamma-Gamma sample paths for increasing coherence times.
+
+    Same strong-turbulence link and same seed in every panel — only the
+    coherence time changes, so the growing temporal memory is directly
+    visible: τ = 0 is white Gamma-Gamma noise, larger τ produces fades that
+    persist across many samples (what the RL router can learn to exploit).
+    The small-scale coherence time is set to τ_large / 5, reflecting the
+    faster evolution of small eddies.
+
+    Args:
+        n_samples: Number of time samples per trace.
+        dt_s: Sample interval [s]. Default 1 ms.
+        tau_large_values_s: Large-scale coherence times [s] to compare.
+            Defaults to [0 (i.i.d.), 10 ms, 100 ms].
+        distance_m: FSO link distance [m].
+        wavelength_m: Optical wavelength [m].
+        seed: Random seed, reused for every panel (same underlying draws).
+        save: If True, saves to plots/correlated_fading_traces.png.
+        show: If True, calls plt.show().
+
+    Returns:
+        The matplotlib Figure object.
+    """
+    _apply_base_style()
+
+    if tau_large_values_s is None:
+        tau_large_values_s = [0.0, 10e-3, 100e-3]
+
+    params = TurbulenceParams(
+        C2n=C2N_STRONG, wavelength=wavelength_m, distance=distance_m
+    )
+    alpha, beta = params.alpha_beta()
+    si = params.scintillation_index()
+
+    fig, axes = plt.subplots(
+        len(tau_large_values_s), 1, figsize=(10, 8), sharex=True, sharey=True
+    )
+    fig.suptitle(
+        f"Correlated Gamma-Gamma Fading — Strong Turbulence  |  "
+        f"α={alpha:.2f}, β={beta:.2f}, SI={si:.3f}  |  Δt = {dt_s*1e3:.0f} ms",
+        fontsize=14, y=1.01,
+    )
+
+    t_ms = np.arange(n_samples) * dt_s * 1e3
+    colors = plt.cm.viridis(np.linspace(0.15, 0.75, len(tau_large_values_s)))  # type: ignore[attr-defined]
+
+    for ax, tau_large, color in zip(np.atleast_1d(axes), tau_large_values_s, colors):
+        tau_small = tau_large / 5.0  # small eddies decorrelate faster
+        rng = np.random.default_rng(seed)  # same seed → same underlying draws
+        series = correlated_gamma_gamma_sample(
+            alpha, beta, n_samples, dt_s, tau_large, tau_small, rng
+        )
+        r1 = empirical_autocorrelation(series, lag=1)
+
+        ax.plot(t_ms, series, color=color, lw=0.9, alpha=0.9)
+        ax.axhline(1.0, color="black", lw=0.8, linestyle="--", alpha=0.5, label="E[I] = 1")
+
+        if tau_large == 0.0:
+            tau_label = "τ_L = 0 (i.i.d.)"
+        else:
+            tau_label = (
+                f"τ_L = {tau_large*1e3:.0f} ms, τ_S = {tau_small*1e3:.0f} ms"
+            )
+        ax.set_ylabel("Irradiance  I(t)")
+        ax.set_title(f"{tau_label}  |  lag-1 autocorr r₁ = {r1:.3f}", fontsize=10)
+        ax.legend(loc="upper right", framealpha=0.7)
+
+    np.atleast_1d(axes)[-1].set_xlabel("Time  [ms]")
+    fig.tight_layout()
+
+    if save:
+        out = _ensure_plots_dir() / "correlated_fading_traces.png"
+        fig.savefig(out, bbox_inches="tight")
+        print(f"[saved] {out}")
+
+    if show:
+        plt.show()
+
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
     print("Generating FSO turbulence plots...")
-    print("\n[1/3] Fading traces")
+    print("\n[1/4] Fading traces")
     plot_fading_traces()
-    print("\n[2/3] BER vs SNR")
+    print("\n[2/4] BER vs SNR")
     plot_ber_vs_snr()
-    print("\n[3/3] Scintillation map")
+    print("\n[3/4] Scintillation map")
     plot_scintillation_map()
+    print("\n[4/4] Correlated fading traces")
+    plot_correlated_fading_traces()
     print("\nDone. Plots written to prototype/plots/")
