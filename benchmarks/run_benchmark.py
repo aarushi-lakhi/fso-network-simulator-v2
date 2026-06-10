@@ -73,6 +73,13 @@ for _dir in (str(_AGENT_DIR), str(_SIM_DIR)):
     if _dir not in sys.path:
         sys.path.insert(0, _dir)
 
+from teacher import (  # noqa: E402
+    DEFAULT_MARGIN as GREEDY_MARGIN,
+    DISJOINT_ROUTE_LINKS,
+    PENTAGON_ROUTE_LINKS as ROUTE_LINKS,
+    GreedyPerTeacher,
+)
+
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 RAW_CSV = RESULTS_DIR / "raw_results.csv"
 CORRELATED_RAW_CSV = RESULTS_DIR / "correlated_raw.csv"
@@ -107,18 +114,9 @@ POLICIES = ("ppo", "ppo-transfer", "static-0", "static-1", "static-2", "static-3
 ALL_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "greedy-per",
                 *POLICIES[1:])
 
-# Candidate routes as link indices into the observation, per topology
-# (install orders in sim/README.md). Pentagon: (0,1) (1,2) (2,3) (3,4)
-# (4,0) (0,2) (1,3) with route 0: 0-2-3, 1: 0-1-3, 2: 0-4-3,
-# 3: 0-1-2-3. Disjoint: (0,3) (0,1) (1,3) (0,2) (2,3) (0,4) (4,3) with
-# route 0: 0-3, 1: 0-1-3, 2: 0-2-3, 3: 0-4-3.
-ROUTE_LINKS = ((5, 2), (0, 6), (4, 3), (0, 1, 2))
-DISJOINT_ROUTE_LINKS = ((0,), (1, 2), (3, 4), (5, 6))
-
-# Hysteresis for greedy-per [summed PER]: at ~12 packets per 0.1 s step a
-# sustained PER-sum improvement of 0.1 repays the flap penalty of 5 in
-# about two steps.
-GREEDY_MARGIN = 0.1
+# Route tables (ROUTE_LINKS/DISJOINT_ROUTE_LINKS) and the greedy-per
+# hysteresis margin are imported from agent/teacher.py, the shared home
+# of the scripted greedy-PER policy since Phase 8.
 
 
 @dataclass(frozen=True)
@@ -411,18 +409,9 @@ def _action_fn_for(policy: str, env, seed: int,
         route = int(policy.split("-", 1)[1])
         return lambda _obs: route
     if policy == "greedy-per":
-        current = 0  # env installs route 0 initially
-
-        def act_greedy_per(obs: np.ndarray) -> int:
-            nonlocal current
-            per = np.asarray(obs, dtype=np.float64).reshape(-1, 4)[:, 1]
-            costs = [float(sum(per[i] for i in links)) for links in route_links]
-            best = int(np.argmin(costs))
-            if costs[best] < costs[current] - GREEDY_MARGIN:
-                current = best
-            return current
-
-        return act_greedy_per
+        # One teacher per evaluation run: as before Phase 8's refactor,
+        # the held route deliberately persists across episodes.
+        return GreedyPerTeacher(route_links, margin=GREEDY_MARGIN).act
     if policy == "random":
         rng = np.random.default_rng(seed)
         return lambda _obs: int(rng.integers(n_actions))
