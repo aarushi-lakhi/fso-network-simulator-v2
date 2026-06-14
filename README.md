@@ -91,8 +91,17 @@ the safest constant action.
 switching policy with a properly warmed-up critic — and fine-tuning *destroys* it in
 both correlated cells, walking entropy from 0.65 to 0.005 nats and switches from 80
 to 0 per episode (under TCP, from an initialization that already beat every static
-route). Exploration is ruled out; the on-policy gradient itself is the failure mode.
-Full paired analysis, switching statistics, and the collapse-trajectory plot in
+route). Exploration is ruled out; the optimizer is the failure mode.
+
+**Phase 9 completed the {PPO, DQN} × {scratch, BC-init} 2×2** with Double DQN, and the
+verdict splits: from scratch, DQN collapses like PPO (but onto the *correct* constant
+route — replay averaging fixes route selection); BC-initialized under UDP it becomes
+the **only quadrant where switching survives** (stable 18 switches/ep over 80k steps,
++3.5 pp PDR over best-static, reward a statistical tie); under TCP the higher return
+noise kills it faster than PPO. The binding constraint is the noise-to-action-gap
+ratio, the scripted teacher remains unbeaten, and the standing hypothesis is that the
+teacher's *hysteresis state* — the currently-held route — simply isn't in the
+observation. Full paired analysis and trajectory plots in
 [`benchmarks/results/README.md`](benchmarks/results/README.md).
 
 ## Repository layout
