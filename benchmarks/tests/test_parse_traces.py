@@ -12,8 +12,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from parse_traces import (  # noqa: E402
     format_paired,
+    format_paired_policies,
     format_table,
     load_raw,
+    merge_reference_rows,
+    paired_policies,
     paired_ppo_vs_best_static,
     summarize,
     write_summary,
@@ -227,6 +230,65 @@ def test_paired_comparison_flags_constant_route_policy(tmp_path: Path) -> None:
     assert "route 1" in text
     assert "2/2" not in text  # W/T/L renders as 0/2/0
     assert "0/2/0" in text
+
+
+# Phase 8 imitation rows sharing the adaptation regime and seeds
+IMITATION_ROWS = [
+    "disjoint-tau500-tcp,1e-13,bc,0,100,-550.0,450,2440,1950,0.799,0.20,1.60,35,40",
+    "disjoint-tau500-tcp,1e-13,bc,1,101,-710.0,590,2440,1810,0.742,0.22,1.47,52,44",
+    "disjoint-tau500-tcp,1e-13,bc-ppo,0,100,-590.0,480,2440,1920,0.787,0.21,1.58,38,1",
+    "disjoint-tau500-tcp,1e-13,bc-ppo,1,101,-700.0,585,2440,1815,0.744,0.22,1.48,51,1",
+]
+
+
+def test_merge_reference_rows_fills_missing_baselines(tmp_path: Path) -> None:
+    imitation_path = tmp_path / "imitation_raw.csv"
+    imitation_path.write_text("\n".join([EXTENDED_HEADER, *IMITATION_ROWS]) + "\n")
+    reference_path = tmp_path / "adaptation_raw.csv"
+    reference_path.write_text(
+        "\n".join([EXTENDED_HEADER, *ADAPTATION_ROWS,
+                   # a regime absent from the imitation rows: must not leak in
+                   "disjoint-iid-udp,1e-13,ppo,0,100,-500.0,450,2440,2000,"
+                   "0.820,0.20,0.0,0,0"]) + "\n")
+    merged = merge_reference_rows(load_raw(imitation_path),
+                                  load_raw(reference_path))
+    policies = {r["policy"] for r in merged}
+    assert policies == {"bc", "bc-ppo", "ppo", "static-0", "static-1"}
+    assert {r["regime"] for r in merged} == {"disjoint-tau500-tcp"}
+
+
+def test_merge_reference_rows_keeps_primary_measurements(tmp_path: Path) -> None:
+    imitation_path = tmp_path / "imitation_raw.csv"
+    imitation_path.write_text(
+        "\n".join([EXTENDED_HEADER, *IMITATION_ROWS,
+                   # a bc row also present in the reference must win
+                   ]) + "\n")
+    reference_path = tmp_path / "adaptation_raw.csv"
+    reference_path.write_text(
+        "\n".join([EXTENDED_HEADER,
+                   "disjoint-tau500-tcp,1e-13,bc,0,100,-9999.0,450,2440,1950,"
+                   "0.799,0.20,1.60,35,40"]) + "\n")
+    merged = merge_reference_rows(load_raw(imitation_path),
+                                  load_raw(reference_path))
+    bc_rewards = [r["reward"] for r in merged if r["policy"] == "bc"]
+    assert -9999.0 not in bc_rewards
+
+
+def test_paired_policies_deltas_and_switches(tmp_path: Path) -> None:
+    path = tmp_path / "imitation_raw.csv"
+    path.write_text("\n".join([EXTENDED_HEADER, *IMITATION_ROWS]) + "\n")
+    results = paired_policies(load_raw(path), "bc-ppo", "bc")
+    assert len(results) == 1
+    row = results[0]
+    assert row["n"] == 2
+    # seed 100: -590 - (-550) = -40; seed 101: -700 - (-710) = +10
+    assert row["reward_delta_mean"] == pytest.approx(-15.0)
+    assert row["wins"] == 1 and row["losses"] == 1
+    assert row["switches_a_mean"] == pytest.approx(1.0)
+    assert row["switches_b_mean"] == pytest.approx(42.0)
+    text = format_paired_policies(results, "bc-ppo", "bc")
+    assert "bc-ppo minus bc" in text
+    assert "1/0/1" in text
 
 
 def test_single_episode_std_is_zero(tmp_path: Path) -> None:

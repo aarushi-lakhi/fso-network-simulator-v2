@@ -8,15 +8,22 @@ results/summary.csv; ``--study correlated`` plots the Phase 6 fading
 coherence-time sweep from results/correlated_summary.csv (files prefixed
 ``correlated_``); ``--study adaptation`` plots the Phase 7
 disjoint-topology study from results/adaptation_summary.csv (files
-prefixed ``adaptation_``, plus a route-switches chart). Styling follows
+prefixed ``adaptation_``, plus a route-switches chart);
+``--study imitation`` plots the Phase 8 study from
+results/imitation_summary.csv (prefix ``imitation_``, headline policies
+only) plus the fine-tuning trajectory chart — entropy, KL from the BC
+policy, and switch rate per update — from
+results/imitation_trajectory_<regime>.csv. Styling follows
 prototype/turbulence_plots.py; the categorical palette is
 Okabe-Ito-derived and colorblind-validated (adjacent-pair CVD
-deltaE >= 12).
+deltaE >= 12; the Phase 8 additions bc/bc-ppo were validated all-pairs
+against every co-plotted policy color).
 
 Typical usage:
     $ python plot_results.py
     $ python plot_results.py --study correlated
     $ python plot_results.py --study adaptation
+    $ python plot_results.py --study imitation
     $ python plot_results.py --summary path/to/summary.csv
 """
 
@@ -63,6 +70,8 @@ POLICY_COLORS = {
     "ppo-per": "#D55E00",
     "ppo-per-ent": "#F0E442",
     "ppo-stack": "#000000",
+    "bc": "#AA4499",
+    "bc-ppo": "#E07126",
     "ppo-transfer": "#56B4E9",
     "best-static": "#009E73",
     "greedy-per": "#999999",
@@ -75,11 +84,28 @@ POLICY_LABELS = {
     "ppo-per": "PPO (PER observation)",
     "ppo-per-ent": "PPO (PER obs, 160k, ent 0.03)",
     "ppo-stack": "PPO (8-frame stack, 160k)",
+    "bc": "BC of greedy-PER teacher",
+    "bc-ppo": "BC + PPO fine-tune",
     "ppo-transfer": "PPO (1e-13 ckpt)",
     "best-static": "Best static route",
     "greedy-per": "Greedy PER (scripted)",
     "random": "Random",
     "aodv": "AODV",
+}
+
+# Phase 8 imitation study: the two correlated adaptation cells; bars are
+# limited to the policies the phase compares so the groups stay legible
+# (the pulled Phase 7 baselines random/aodv/ppo-stack stay in the
+# summary CSV and tables).
+IMITATION_ORDER = ("disjoint-tau500-udp", "disjoint-tau500-tcp")
+IMITATION_POLICIES = ("ppo", "bc", "bc-ppo", "best-static", "greedy-per")
+
+# Fine-tuning trajectory encoding: the entity is the environment config
+# (one line per cell), Okabe-Ito blue/vermillion with distinct line
+# styles as secondary encoding.
+TRAJECTORY_STYLES = {
+    "disjoint-tau500-udp": ("#0072B2", "-", "τ 500/100 ms + UDP"),
+    "disjoint-tau500-tcp": ("#D55E00", "--", "τ 500/100 ms + TCP"),
 }
 
 METRIC_SPECS = (
@@ -147,6 +173,7 @@ def plot_metric(
     x_labels: dict[str, str] | None = None,
     x_axis_label: str = "Turbulence regime",
     subtitle: str = "10 episodes, shared seeds",
+    policies: tuple[str, ...] | None = None,
 ) -> plt.Figure:
     """Render one grouped bar chart (sweep points on x, one bar per policy).
 
@@ -161,6 +188,8 @@ def plot_metric(
         x_labels: Sweep point tick labels; defaults to REGIME_LABELS.
         x_axis_label: x-axis title.
         subtitle: Trailing fragment of the figure title.
+        policies: Policies to draw (POLICY_COLORS order); None draws
+            every policy present in the table.
 
     Returns:
         The matplotlib Figure.
@@ -168,7 +197,8 @@ def plot_metric(
     _apply_base_style()
     x_labels = REGIME_LABELS if x_labels is None else x_labels
     policies = [p for p in POLICY_COLORS
-                if any((r, p) in table for r in x_order)]
+                if (policies is None or p in policies)
+                and any((r, p) in table for r in x_order)]
     regimes = [r for r in x_order
                if any((r, p) in table for p in policies)]
 
@@ -211,10 +241,115 @@ def plot_metric(
     return fig
 
 
+def load_trajectory(path: str | Path) -> dict[str, list]:
+    """Load one fine-tuning trajectory CSV as columns.
+
+    Args:
+        path: Path to imitation_trajectory_<regime>.csv (written by
+            agent/imitation.py finetune).
+
+    Returns:
+        Mapping of column name to list; numeric columns as floats with
+        NaN for blanks.
+    """
+    numeric = ("update", "global_step", "entropy", "value_loss", "policy_loss",
+               "approx_kl", "kl_from_bc", "sampled_switches_per_200",
+               "greedy_switches_per_200", "mean_episode_reward")
+    columns: dict[str, list] = {}
+    with open(path, newline="", encoding="utf-8") as fp:
+        for row in csv.DictReader(fp):
+            for key, value in row.items():
+                if key in numeric:
+                    value = float(value) if value not in ("", None) else np.nan
+                columns.setdefault(key, []).append(value)
+    return columns
+
+
+def plot_imitation_trajectory(
+    trajectories: dict[str, dict[str, list]],
+    filename: str = "imitation_trajectory.png",
+    save: bool = True,
+) -> plt.Figure:
+    """Render the Phase 8 fine-tuning trajectory (the study's result).
+
+    Three stacked panels over PPO updates: policy entropy, KL from the
+    frozen BC policy, and the greedy-policy switch rate (per 200-step
+    episode). The value-warmup updates are shaded; reference lines mark
+    the uniform-policy entropy, the Phase 7c collapse entropy, and the
+    teacher's eval switch rate.
+
+    Args:
+        trajectories: Mapping of regime name to trajectory columns
+            (from :func:`load_trajectory`).
+        filename: Output file name under results/plots/.
+        save: If True, save the PNG.
+
+    Returns:
+        The matplotlib Figure.
+    """
+    _apply_base_style()
+    fig, axes = plt.subplots(3, 1, figsize=(9, 9), sharex=True)
+    ax_entropy, ax_kl, ax_switch = axes
+
+    warmup_end = 0.0
+    for regime, cols in trajectories.items():
+        color, linestyle, label = TRAJECTORY_STYLES.get(
+            regime, ("#0072B2", "-", regime))
+        updates = np.asarray(cols["update"], dtype=float)
+        phases = cols["phase"]
+        warmup_end = max(warmup_end,
+                         max((u for u, ph in zip(updates, phases)
+                              if ph == "warmup"), default=0.0))
+        ax_entropy.plot(updates, cols["entropy"], color=color,
+                        linestyle=linestyle, lw=2, label=label)
+        ax_kl.plot(updates, cols["kl_from_bc"], color=color,
+                   linestyle=linestyle, lw=2, label=label)
+        ax_switch.plot(updates, cols["greedy_switches_per_200"], color=color,
+                       linestyle=linestyle, lw=2, label=label)
+
+    ax_entropy.axhline(np.log(4), color="#666666", lw=1, linestyle=":")
+    ax_entropy.annotate("uniform (ln 4)", xy=(0.99, np.log(4)),
+                        xycoords=("axes fraction", "data"),
+                        ha="right", va="bottom", fontsize=9, color="#666666")
+    ax_entropy.axhline(0.005, color="#666666", lw=1, linestyle=":")
+    ax_entropy.annotate("Phase 7c collapse (0.005)", xy=(0.99, 0.005),
+                        xycoords=("axes fraction", "data"),
+                        ha="right", va="bottom", fontsize=9, color="#666666")
+    ax_switch.axhline(46.0, color="#666666", lw=1, linestyle=":")
+    ax_switch.annotate("teacher (46/ep)", xy=(0.99, 46.0),
+                       xycoords=("axes fraction", "data"),
+                       ha="right", va="bottom", fontsize=9, color="#666666")
+
+    ax_entropy.set_ylabel("Policy entropy [nats]")
+    ax_kl.set_ylabel("KL from BC policy [nats]")
+    ax_switch.set_ylabel("Greedy switches / 200 steps")
+    ax_switch.set_xlabel("Update (500 env steps each)")
+    for ax in axes:
+        if warmup_end > 0:
+            ax.axvspan(0, warmup_end + 0.5, color="#dddddd", alpha=0.5,
+                       zorder=0)
+        ax.legend(loc="best", framealpha=0.85)
+    ax_entropy.annotate("value warmup\n(policy frozen)",
+                        xy=(warmup_end / 2, 0.95),
+                        xycoords=("data", "axes fraction"),
+                        ha="center", va="top", fontsize=9, color="#444444")
+    ax_entropy.set_title("PPO fine-tuning from the BC initialisation — "
+                         "does the switching policy survive?")
+    fig.tight_layout()
+
+    if save:
+        PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+        out = PLOTS_DIR / filename
+        fig.savefig(out, bbox_inches="tight")
+        print(f"[saved] {out}")
+    return fig
+
+
 def main() -> None:
     """CLI entry point: render all four benchmark charts."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--study", choices=("turbulence", "correlated", "adaptation"),
+    parser.add_argument("--study", choices=("turbulence", "correlated",
+                                            "adaptation", "imitation"),
                         default="turbulence",
                         help="picks the default summary file, x-axis, and "
                              "output file prefix")
@@ -224,9 +359,26 @@ def main() -> None:
 
     defaults = {"turbulence": "summary.csv",
                 "correlated": "correlated_summary.csv",
-                "adaptation": "adaptation_summary.csv"}
+                "adaptation": "adaptation_summary.csv",
+                "imitation": "imitation_summary.csv"}
     table = load_summary(args.summary or str(RESULTS_DIR / defaults[args.study]))
-    if args.study == "correlated":
+    if args.study == "imitation":
+        for metric, title, ylabel, filename in (*METRIC_SPECS,
+                                                *ADAPTATION_EXTRA_SPECS):
+            plot_metric(table, metric, title, ylabel, f"imitation_{filename}",
+                        x_order=IMITATION_ORDER, x_labels=ADAPTATION_LABELS,
+                        x_axis_label="Environment config (disjoint topology, "
+                                     "C²ₙ = 1e-13 m⁻²ᐟ³)",
+                        subtitle="10 episodes, shared seeds",
+                        policies=IMITATION_POLICIES)
+        trajectories = {
+            regime: load_trajectory(path)
+            for regime in IMITATION_ORDER
+            if (path := RESULTS_DIR / f"imitation_trajectory_{regime}.csv").exists()
+        }
+        if trajectories:
+            plot_imitation_trajectory(trajectories)
+    elif args.study == "correlated":
         for metric, title, ylabel, filename in METRIC_SPECS:
             plot_metric(table, metric, title, ylabel, f"correlated_{filename}",
                         x_order=COHERENCE_ORDER, x_labels=COHERENCE_LABELS,
