@@ -1,4 +1,4 @@
-# Benchmark results (Phases 5, 6 & 7)
+# Benchmark results (Phases 5–8)
 
 PPO routing vs classical baselines on the 5-node FSO mesh (one 2 Mbps UDP
 flow 0→3, 7 Gamma-Gamma faded links, 100-step episodes at 0.1 s/step).
@@ -223,6 +223,127 @@ with PDR ≈ 0): when the locked route's link is deep-faded at episode
 start, the TCP handshake itself can fail and nothing flows for the
 whole episode — a failure mode adaptive policies simply do not have.
 
+## Phase 8: the imitation-then-RL study
+
+Phase 7 ended with the bottleneck moved onto the optimizer: adaptation
+is provably profitable (the scripted greedy-PER teacher collects the
+margin) and PPO trained from scratch always collapses to a constant
+route. Phase 8 separates the two remaining hypotheses. Behavior-clone
+the teacher — a switching policy obtained *without any exploration* —
+then fine-tune it with PPO. If fine-tuning holds or improves the
+switching policy, exploration (finding it) was the bottleneck; if it
+degrades the policy back to a constant route, the on-policy gradient
+itself is.
+
+Setup (same two correlated cells, seeds, and env settings as Phase 7,
+so the ppo / best-static / greedy-per rows below are the committed
+`adaptation_raw.csv` measurements, not re-runs): per cell, 25 teacher
+episodes on training seeds 42–66 (5 000 (obs, action) pairs), a
+cross-entropy fit of the actor head with a 5-episode held-out split
+(`bc`), an 8 000-step value warmup on rollouts from the frozen BC
+policy — the fresh critic would otherwise feed garbage advantages to
+the first updates — then an 80 000-step PPO fine-tune (`bc-ppo`, the
+7c budget class, identical hyperparameters). Machinery:
+`agent/teacher.py`, `agent/imitation.py`,
+`run_benchmark.py --study imitation`.
+
+**BC fidelity.** Validation action-match accuracy is 0.626 (UDP) /
+0.631 (TCP) against a 0.372 majority-class baseline — capped well
+below 1.0 for a structural reason: the teacher's hysteresis state (the
+currently-held route) is not in the observation, so a stateless MLP
+cannot express the hold rule, only the argmin-PER preference.
+Behaviorally the clone is nonetheless a faithful fade-dodger: it
+matches the teacher's PDR (0.913 vs 0.914 UDP) and goodput (0.799 vs
+0.788 Mbps TCP) and reproduces its PHY-drop profile (213 vs 210
+drops/ep UDP), but switches ~73 times per episode where the teacher
+switches 46 — and the reward gap to the teacher is almost exactly the
+flap-penalty bill for those extra switches ((73.3 − 46.0) × 5 ≈ 137 vs
+a measured Δ of 134 UDP / 124 TCP). BC lands between best-static and
+the teacher in the TCP cell (beats best-static 6/4 paired, +47.2) and
+just below best-static in the UDP cell (4/6, −45.0, the flap tax)
+while delivering +13.7 pp PDR there.
+
+| config | policy | reward | PDR | goodput [Mbps] | switches/ep |
+|---|---|---|---|---|---|
+| τ 500/100 ms + UDP | PPO scratch (7c, ≡ route 3) | −618.0 ± 165.7 | 0.770 ± 0.068 | — | 1.0 |
+| τ 500/100 ms + UDP | **bc** (clone of teacher) | −618.0 ± 117.4 | **0.913 ± 0.029** | — | 73.3 |
+| τ 500/100 ms + UDP | **bc-ppo** (fine-tuned, ≡ route 0) | −572.9 ± 140.1 | 0.776 ± 0.057 | — | 0.0 |
+| τ 500/100 ms + UDP | best static (route 0) | −572.9 ± 140.1 | 0.776 ± 0.057 | — | 0 |
+| τ 500/100 ms + UDP | greedy-PER (teacher) | **−484.5 ± 113.8** | 0.914 ± 0.026 | — | 46.0 |
+| τ 500/100 ms + TCP | PPO scratch (7c, ≡ route 2) | −2120.2 ± 404.0 | 0.730 ± 0.302 | 0.274 | 1.0 |
+| τ 500/100 ms + TCP | **bc** (clone of teacher) | −1850.4 ± 548.8 | 0.918 ± 0.112 | **0.799** | 73.5 |
+| τ 500/100 ms + TCP | **bc-ppo** (fine-tuned) | −1925.5 ± 444.1 | 0.869 ± 0.163 | 0.462 | 8.2 |
+| τ 500/100 ms + TCP | best static (route 0) | −1897.6 ± 453.2 | 0.870 ± 0.163 | 0.451 | 0 |
+| τ 500/100 ms + TCP | greedy-PER (teacher) | **−1726.8 ± 569.6** | **0.928 ± 0.083** | 0.788 | 46.0 |
+
+Paired per-episode analysis (shared seeds;
+`parse_traces.py --study imitation --paired`):
+
+| comparison | config | reward Δ | PDR Δ | W/T/L | notes |
+|---|---|---|---|---|---|
+| bc − best-static | UDP | −45.0 ± 139.5 | +0.137 | 4/0/6 | the flap tax |
+| bc − best-static | TCP | +47.2 ± 298.0 | +0.047 | 6/0/4 | profitable start |
+| bc-ppo − best-static | UDP | 0.0 ± 0.0 | +0.000 | 0/10/0 | byte-identical to route 0 |
+| bc-ppo − best-static | TCP | −27.9 ± 28.0 | −0.001 | 1/0/9 | |
+| bc-ppo − bc | UDP | +45.0 ± 139.5 | −0.137 | 6/0/4 | switching traded for reward |
+| bc-ppo − bc | TCP | −75.1 ± 308.9 | −0.048 | 4/0/6 | strictly degraded |
+
+**The verdict: fine-tuning destroys the switching policy in both
+cells — the on-policy gradient itself is the bottleneck, not
+exploration.** The trajectory (`plots/imitation_trajectory.png`;
+per-update CSVs `imitation_trajectory_*.csv` — this trajectory is the
+result) shows it happening. The BC policy starts at entropy ≈ 0.65
+nats with ~80 greedy switches per episode. In the UDP cell PPO drains
+both monotonically: by update ~40 (20k steps) switching has halved, by
+update ~93 (46k steps) the policy is fully collapsed — entropy < 0.01
+(the Phase 7c signature), zero switches, KL from the BC policy
+climbing to ~5.5 nats — and it stays there for the remaining 40k
+steps. Evaluation confirms total collapse: bc-ppo's per-episode
+rewards are byte-identical to static route 0 on all 10 seeds. The TCP
+cell resists longer (the switching payoff is larger): the decay is
+non-monotonic with partial recoveries near updates 105–130, but it
+too reaches the collapsed state by update ~145, and its end-of-run
+twitches leave a nearly-constant policy (8.2 switches/ep) that loses
+to plain best-static 9/10 episodes.
+
+Two honest readings of the UDP cell. First, the collapse there is
+locally reward-rational: the hysteresis-free clone pays ~137/episode
+in flap penalties, so best-static (−572.9) really is better than the
+BC start (−618.0), and PPO cashes that in (+45, 6/4 vs bc) — it even
+collapses onto the *correct* constant route (route 0, the true
+best-static, where scratch runs lottery onto routes 1–3). But a
+strictly better policy sat one hysteresis away: the teacher (−484.5)
+switches 27 fewer times over the same fades the clone already dodges,
+and gradient descent on the switching side of policy space could
+plausibly have found it (switch less when margins are small) — instead
+the gradient exited the switching regime entirely and never returned:
+once entropy is drained, no gradient path leads back out. Second, the
+TCP cell removes even that excuse: there the BC start was already
+*better* than best-static (+47.2, 6/4) and the teacher better still
+(+170.8, 8/2), yet fine-tuning still walked the policy down to the
+constant-route attractor (−75.1 vs its own initialisation, 4/6). PPO
+did not fail to *find* the switching policy — it was handed one, with
+a warmed-up critic, and dismantled it. Under this return variance
+(per-episode std 140–570, larger than every between-policy margin),
+the surviving-action-probability dynamics of the on-policy gradient
+point one way: toward the constant route.
+
+What this pins down for the write-up: exploration is ruled out as the
+binding constraint; the fix must change the gradient's information,
+not the starting point — variance reduction (seed-paired advantage
+baselines, many-episode updates, much longer horizons), rewards that
+pay for correct switches directly, or off-policy/imitation-regularized
+objectives (e.g. a KL leash to the teacher, which the KL panel shows
+would bind early: the policy leaves the BC neighbourhood within ~10
+updates of unfreezing).
+
+Reproduction: BC datasets and intermediate artifacts live in
+`results/checkpoints/` (gitignored; the four bc/bc-ppo policy
+checkpoints *are* committed there, ~55–160 KB each).
+`python run_benchmark.py --study imitation` regenerates everything
+(datasets, BC, warmup + fine-tune, eval; ~11 min); per-cell re-runs
+via `--regime`, full retrain via `--retrain`.
+
 ## Reproducing
 
 ```bash
@@ -249,6 +370,12 @@ The Phase 7 study: `python run_benchmark.py --study adaptation` (then
 --study adaptation`); `--regime` re-runs a single config. The ppo-stack
 variant trains at 160k steps (~9 min per correlated cell); everything
 else matches the Phase 6 budgets.
+
+The Phase 8 study: `python run_benchmark.py --study imitation` (then
+`parse_traces.py --study imitation [--paired]` and `plot_results.py
+--study imitation`). The parser and plots pull the Phase 7 baselines
+from the committed `adaptation_raw.csv` for comparison; only the
+bc/bc-ppo rows are measured by this study.
 
 `run_benchmark.py --quick` smoke-tests the pipeline in ~1 min;
 `--regime`/`--policy` re-run a single cell (rows are replaced in place).
