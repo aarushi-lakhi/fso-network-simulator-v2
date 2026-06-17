@@ -18,6 +18,9 @@
 #ifndef GAMMA_GAMMA_FSO_LOSS_MODEL_H
 #define GAMMA_GAMMA_FSO_LOSS_MODEL_H
 
+#include "correlated-gamma-gamma-fading.h"
+
+#include "ns3/nstime.h"
 #include "ns3/propagation-loss-model.h"
 #include "ns3/random-variable-stream.h"
 
@@ -57,9 +60,13 @@ namespace ns3
  * The received power is
  * \f$ P_{rx} = P_{tx} + 10\log_{10} e^{-\sigma_{ext} d} + 10\log_{10} I \f$ [dBm].
  *
- * Each call to CalcRxPower() draws a fresh fading sample, i.e. the model has
- * no temporal correlation; block-fading dynamics are provided by callers that
- * sample the model periodically (see FsoTopologyHelper).
+ * Temporal statistics are controlled by the CoherenceTimeLargeScale and
+ * CoherenceTimeSmallScale attributes. With both zero (the default) each call
+ * to CalcRxPower() / GetFadingSample() draws a fresh i.i.d. sample and
+ * block-fading dynamics are provided by callers that sample the model
+ * periodically (see FsoTopologyHelper). With a positive coherence time the
+ * samples evolve as a temporally correlated process with the exact same
+ * Gamma-Gamma marginal (see CorrelatedGammaGammaFading).
  */
 class GammaGammaFsoLossModel : public PropagationLossModel
 {
@@ -107,7 +114,9 @@ class GammaGammaFsoLossModel : public PropagationLossModel
      *
      * Returns \f$ I = X Y \f$ with \f$ X \sim \Gamma(\alpha, 1/\alpha) \f$,
      * \f$ Y \sim \Gamma(\beta, 1/\beta) \f$, so that \f$ E[I] = 1 \f$.
-     * Returns exactly 1.0 when turbulence is disabled.
+     * Returns exactly 1.0 when turbulence is disabled. With a positive
+     * coherence time the draws come from the owned temporally correlated
+     * process (evolving on the simulator clock) instead of being i.i.d.
      *
      * \param distance path length [m], must be > 0
      * \return normalised irradiance sample (> 0)
@@ -122,7 +131,37 @@ class GammaGammaFsoLossModel : public PropagationLossModel
      */
     double GetExtinctionLossDb(double distance) const;
 
+    /**
+     * \brief Get the large-scale (alpha component) fading coherence time.
+     * \return the coherence time (zero means i.i.d. fading)
+     */
+    Time GetCoherenceTimeLargeScale() const;
+
+    /**
+     * \brief Get the small-scale (beta component) fading coherence time.
+     * \return the coherence time (zero means i.i.d. fading)
+     */
+    Time GetCoherenceTimeSmallScale() const;
+
+    /**
+     * \brief Check whether the random Gamma-Gamma fading term is applied.
+     * \return true if turbulence fading is enabled
+     */
+    bool IsTurbulenceEnabled() const;
+
   private:
+    /**
+     * \brief Setter for the CoherenceTimeLargeScale attribute.
+     * \param tau the coherence time (also forwarded to the owned process)
+     */
+    void SetCoherenceTimeLargeScale(Time tau);
+
+    /**
+     * \brief Setter for the CoherenceTimeSmallScale attribute.
+     * \param tau the coherence time (also forwarded to the owned process)
+     */
+    void SetCoherenceTimeSmallScale(Time tau);
+
     double DoCalcRxPower(double txPowerDbm,
                          Ptr<MobilityModel> a,
                          Ptr<MobilityModel> b) const override;
@@ -132,7 +171,10 @@ class GammaGammaFsoLossModel : public PropagationLossModel
     double m_wavelength;    //!< Optical wavelength [m]
     double m_extinction;    //!< Beer-Lambert extinction coefficient [1/m]
     bool m_turbulence;      //!< Whether Gamma-Gamma fading is applied
-    Ptr<GammaRandomVariable> m_rng; //!< RNG for the two Gamma variates
+    Time m_tauLargeScale;   //!< Coherence time of the alpha component
+    Time m_tauSmallScale;   //!< Coherence time of the beta component
+    Ptr<GammaRandomVariable> m_rng; //!< RNG for the two i.i.d. Gamma variates
+    Ptr<CorrelatedGammaGammaFading> m_correlatedFading; //!< Correlated process
 };
 
 } // namespace ns3
