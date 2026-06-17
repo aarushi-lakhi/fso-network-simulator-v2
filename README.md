@@ -85,8 +85,24 @@ episodes in both correlated cells (+13.8 pp PDR under UDP, +75% goodput under TC
 PPO — even frame-stacked at double budget — still collapses to a constant route with
 near-zero policy entropy. The bottleneck is no longer the environment; it's the
 optimizer: on-policy PPO under episode-return noise of ~25% of the mean retreats to
-the safest constant action. Full paired analysis, switching statistics, and the
-oracle gap in [`benchmarks/results/README.md`](benchmarks/results/README.md).
+the safest constant action.
+
+**Phase 8 proved it.** Behavior-cloning the scripted rule hands PPO a working
+switching policy with a properly warmed-up critic — and fine-tuning *destroys* it in
+both correlated cells, walking entropy from 0.65 to 0.005 nats and switches from 80
+to 0 per episode (under TCP, from an initialization that already beat every static
+route). Exploration is ruled out; the optimizer is the failure mode.
+
+**Phase 9 completed the {PPO, DQN} × {scratch, BC-init} 2×2** with Double DQN, and the
+verdict splits: from scratch, DQN collapses like PPO (but onto the *correct* constant
+route — replay averaging fixes route selection); BC-initialized under UDP it becomes
+the **only quadrant where switching survives** (stable 18 switches/ep over 80k steps,
++3.5 pp PDR over best-static, reward a statistical tie); under TCP the higher return
+noise kills it faster than PPO. The binding constraint is the noise-to-action-gap
+ratio, the scripted teacher remains unbeaten, and the standing hypothesis is that the
+teacher's *hysteresis state* — the currently-held route — simply isn't in the
+observation. Full paired analysis and trajectory plots in
+[`benchmarks/results/README.md`](benchmarks/results/README.md).
 
 ## Repository layout
 

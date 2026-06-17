@@ -17,6 +17,21 @@ Three studies share this orchestrator:
   correlated fading + TCP); results go to results/adaptation_raw.csv.
   Rows additionally carry goodput/retx (TCP) and the number of
   within-episode route switches.
+* ``--study imitation`` (Phase 8) reuses the two correlated adaptation
+  cells and runs the imitation-then-RL pipeline per cell: collect a
+  greedy-PER teacher dataset on training seeds, behavior-clone it,
+  value-warmup + PPO fine-tune (agent/imitation.py), then evaluate the
+  ``bc`` and ``bc-ppo`` policies on the shared eval seeds into
+  results/imitation_raw.csv. The baselines those rows are compared
+  against (ppo, statics, greedy-per) come from the committed Phase 7
+  adaptation_raw.csv — same seeds, same settings, not re-run.
+* ``--study offpolicy`` (Phase 9) reuses the same two correlated cells
+  and trains Double DQN per cell twice — ``dqn-scratch`` (fresh
+  Q-network) and ``dqn-bc`` (Q-network initialised from the committed
+  Phase 8 BC checkpoint, low initial epsilon) — via agent/dqn.py, then
+  evaluates both greedy policies on the shared eval seeds into
+  results/offpolicy_raw.csv. Baselines (ppo, statics, greedy-per, bc,
+  bc-ppo) again come from the committed Phase 7/8 CSVs, not re-runs.
 
 Policies compared per sweep point on the 5-node FSO mesh:
 
@@ -73,10 +88,19 @@ for _dir in (str(_AGENT_DIR), str(_SIM_DIR)):
     if _dir not in sys.path:
         sys.path.insert(0, _dir)
 
+from teacher import (  # noqa: E402
+    DEFAULT_MARGIN as GREEDY_MARGIN,
+    DISJOINT_ROUTE_LINKS,
+    PENTAGON_ROUTE_LINKS as ROUTE_LINKS,
+    GreedyPerTeacher,
+)
+
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 RAW_CSV = RESULTS_DIR / "raw_results.csv"
 CORRELATED_RAW_CSV = RESULTS_DIR / "correlated_raw.csv"
 ADAPTATION_RAW_CSV = RESULTS_DIR / "adaptation_raw.csv"
+IMITATION_RAW_CSV = RESULTS_DIR / "imitation_raw.csv"
+OFFPOLICY_RAW_CSV = RESULTS_DIR / "offpolicy_raw.csv"
 CHECKPOINTS_DIR = RESULTS_DIR / "checkpoints"
 PHASE4_CHECKPOINT = _AGENT_DIR / "checkpoints" / "ns3_ppo.pt"
 DEFAULT_SIM_CONFIG = _REPO_DIR / "ns3-rl-router" / "config" / "sim_config.yaml"
@@ -105,20 +129,11 @@ POLICIES = ("ppo", "ppo-transfer", "static-0", "static-1", "static-2", "static-3
 # FRAME_STACK_K stacked observations (train and eval both wrap the env
 # in FlatFrameStack).
 ALL_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "greedy-per",
-                *POLICIES[1:])
+                "bc", "bc-ppo", "dqn-scratch", "dqn-bc", *POLICIES[1:])
 
-# Candidate routes as link indices into the observation, per topology
-# (install orders in sim/README.md). Pentagon: (0,1) (1,2) (2,3) (3,4)
-# (4,0) (0,2) (1,3) with route 0: 0-2-3, 1: 0-1-3, 2: 0-4-3,
-# 3: 0-1-2-3. Disjoint: (0,3) (0,1) (1,3) (0,2) (2,3) (0,4) (4,3) with
-# route 0: 0-3, 1: 0-1-3, 2: 0-2-3, 3: 0-4-3.
-ROUTE_LINKS = ((5, 2), (0, 6), (4, 3), (0, 1, 2))
-DISJOINT_ROUTE_LINKS = ((0,), (1, 2), (3, 4), (5, 6))
-
-# Hysteresis for greedy-per [summed PER]: at ~12 packets per 0.1 s step a
-# sustained PER-sum improvement of 0.1 repays the flap penalty of 5 in
-# about two steps.
-GREEDY_MARGIN = 0.1
+# Route tables (ROUTE_LINKS/DISJOINT_ROUTE_LINKS) and the greedy-per
+# hysteresis margin are imported from agent/teacher.py, the shared home
+# of the scripted greedy-PER policy since Phase 8.
 
 
 @dataclass(frozen=True)
@@ -211,6 +226,40 @@ ADAPTATION_POLICIES = ("ppo", "ppo-stack", "static-0", "static-1", "static-2",
 FRAME_STACK_K = 8
 VARIANT_TRAIN_STEPS = {"ppo-stack": 160_000}
 STACK_SKIP_REGIMES = ("disjoint-iid-udp",)
+
+# Phase 8 imitation study: same two correlated cells as Phase 7 (the
+# i.i.d. control is pointless here — the teacher provably loses on
+# white noise), same eval seeds and env settings, so imitation_raw.csv
+# rows are directly comparable with the committed adaptation_raw.csv
+# baselines. Per cell: 25 teacher episodes on training seeds 42..66
+# (5000 pairs at 200 steps/episode), BC, 8k-step value warmup on the
+# frozen BC policy, 80k-step PPO fine-tune (the 7c budget class).
+IMITATION_CONFIGS: dict[str, CoherenceConfig] = {
+    name: ADAPTATION_CONFIGS[name]
+    for name in ("disjoint-tau500-udp", "disjoint-tau500-tcp")
+}
+IMITATION_POLICIES = ("bc", "bc-ppo")
+BC_DATASET_EPISODES = 25
+BC_EPOCHS = 40
+BC_WARMUP_STEPS = 8_000
+IMITATION_TRAIN_STEPS = 80_000
+
+# Phase 9 off-policy study: the same two correlated cells, completing
+# the {PPO, DQN} x {scratch, BC-init} 2x2. Per cell, Double DQN trains
+# twice (agent/dqn.py): dqn-scratch explores from a fresh Q-network
+# (epsilon 1.0 -> 0.05 over the first half of the budget), dqn-bc
+# initialises the Q-network from the committed Phase 8 BC checkpoint
+# and keeps epsilon LOW from the start (0.05 -> 0.01) so random actions
+# do not wash the handed policy out of the replay buffer. The BC-init
+# Q-values are the BC logits shifted by a constant (argmax-invariant)
+# offset onto the return scale: mean step reward of the committed bc
+# eval rows / (1 - gamma). Budget matches Phase 8's fine-tune.
+OFFPOLICY_CONFIGS = IMITATION_CONFIGS
+OFFPOLICY_POLICIES = ("dqn-scratch", "dqn-bc")
+OFFPOLICY_TRAIN_STEPS = 80_000
+DQN_GAMMA = 0.99
+DQN_SCRATCH_EPS = ("1.0", "0.05", 40_000)
+DQN_BC_EPS = ("0.05", "0.01", 20_000)
 
 CSV_FIELDS = ("regime", "c2n", "policy", "episode", "sim_seed", "reward",
               "drops", "tx_pkts", "rx_pkts", "pdr", "mean_delay_ms",
@@ -403,7 +452,14 @@ def _action_fn_for(policy: str, env, seed: int,
     n_actions = int(env.action_space.n)
     if policy == "ppo-transfer":
         return _load_agent(PHASE4_CHECKPOINT, obs_dim, n_actions).act_greedy
-    if policy.startswith("ppo"):
+    if policy.startswith("dqn"):
+        from dqn import DQNAgent
+
+        variant, regime = policy.split(":", 1)
+        agent = DQNAgent(obs_dim, n_actions)
+        agent.load(CHECKPOINTS_DIR / f"{variant.replace('-', '_')}_{regime}.pt")
+        return agent.act_greedy
+    if policy.startswith(("ppo", "bc")):
         variant, regime = policy.split(":", 1)
         checkpoint = CHECKPOINTS_DIR / f"{variant.replace('-', '_')}_{regime}.pt"
         return _load_agent(checkpoint, obs_dim, n_actions).act_greedy
@@ -411,18 +467,9 @@ def _action_fn_for(policy: str, env, seed: int,
         route = int(policy.split("-", 1)[1])
         return lambda _obs: route
     if policy == "greedy-per":
-        current = 0  # env installs route 0 initially
-
-        def act_greedy_per(obs: np.ndarray) -> int:
-            nonlocal current
-            per = np.asarray(obs, dtype=np.float64).reshape(-1, 4)[:, 1]
-            costs = [float(sum(per[i] for i in links)) for links in route_links]
-            best = int(np.argmin(costs))
-            if costs[best] < costs[current] - GREEDY_MARGIN:
-                current = best
-            return current
-
-        return act_greedy_per
+        # One teacher per evaluation run: as before Phase 8's refactor,
+        # the held route deliberately persists across episodes.
+        return GreedyPerTeacher(route_links, margin=GREEDY_MARGIN).act
     if policy == "random":
         rng = np.random.default_rng(seed)
         return lambda _obs: int(rng.integers(n_actions))
@@ -458,7 +505,8 @@ def eval_worker(args: argparse.Namespace) -> None:
     try:
         for policy in policies:
             worker_policy = policy
-            if policy != "ppo-transfer" and policy.startswith("ppo"):
+            if policy != "ppo-transfer" and policy.startswith(("ppo", "bc",
+                                                               "dqn")):
                 worker_policy = f"{policy}:{regime}"
             policy_env = env
             if policy.startswith("ppo-stack"):
@@ -553,6 +601,182 @@ def train_regime_policy(regime: str, c2n: str, total_steps: int,
         stderr=subprocess.DEVNULL,
         check=True,
     )
+
+
+def _run_agent_stage(cmd: list[str], label: str) -> str:
+    """Run one imitation stage (agent/imitation.py) in a subprocess.
+
+    Args:
+        cmd: Full command line (already includes sys.executable).
+        label: Stage name for error messages.
+
+    Returns:
+        The stage's stdout.
+
+    Raises:
+        RuntimeError: If the stage exited non-zero.
+    """
+    proc = subprocess.run(cmd, cwd=_AGENT_DIR, capture_output=True, text=True)
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr[-4000:])
+        raise RuntimeError(f"{label} failed (rc={proc.returncode})")
+    return proc.stdout
+
+
+def run_imitation_pipeline(regime: str, c2n: str, coherence: CoherenceConfig,
+                           args: argparse.Namespace) -> None:
+    """Collect + BC + fine-tune one imitation cell (Phase 8).
+
+    Each stage runs in its own subprocess (collect and finetune own a
+    gym env); existing artifacts are reused unless --retrain. The BC
+    learning curve, fine-tune trajectory, and fine-tune episode rewards
+    are written to results/ as committed CSVs.
+
+    Args:
+        regime: Imitation cell name (an ADAPTATION_CONFIGS key).
+        c2n: Turbulence strength of the cell.
+        coherence: Env sweep point of the cell.
+        args: Orchestrator CLI namespace (quick/retrain/train knobs).
+    """
+    CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
+    imitation_py = str(_AGENT_DIR / "imitation.py")
+    dataset = CHECKPOINTS_DIR / f"bc_dataset_{regime}.npz"
+    bc_ckpt = CHECKPOINTS_DIR / f"bc_{regime}.pt"
+    bc_ppo_ckpt = CHECKPOINTS_DIR / f"bc_ppo_{regime}.pt"
+    env_args = ["--c2n", c2n, *_coherence_cli_args(coherence)]
+
+    if args.retrain or not dataset.exists():
+        episodes = 2 if args.quick else BC_DATASET_EPISODES
+        print(f"[{regime}] collecting {episodes} teacher episodes ...", flush=True)
+        out = _run_agent_stage(
+            [sys.executable, imitation_py, "collect", "--out", str(dataset),
+             "--episodes", str(episodes), "--seed", str(args.train_seed),
+             *env_args],
+            f"{regime} collect")
+        print("\n".join(line for line in out.splitlines()
+                        if line.startswith("[collect] wrote")
+                        or line.startswith("[collect] teacher")), flush=True)
+    else:
+        print(f"[{regime}] reusing dataset {dataset}")
+
+    if args.retrain or not bc_ckpt.exists():
+        epochs = 5 if args.quick else BC_EPOCHS
+        print(f"[{regime}] behavior cloning ({epochs} epochs) ...", flush=True)
+        out = _run_agent_stage(
+            [sys.executable, imitation_py, "bc", "--dataset", str(dataset),
+             "--checkpoint", str(bc_ckpt), "--epochs", str(epochs),
+             "--metrics-csv", str(RESULTS_DIR / f"imitation_bc_{regime}.csv")],
+            f"{regime} bc")
+        print("\n".join(line for line in out.splitlines()
+                        if line.startswith("[bc]")), flush=True)
+    else:
+        print(f"[{regime}] reusing BC checkpoint {bc_ckpt}")
+
+    if args.retrain or not bc_ppo_ckpt.exists():
+        warmup = 500 if args.quick else BC_WARMUP_STEPS
+        total = 1000 if args.quick else (args.train_steps
+                                         or IMITATION_TRAIN_STEPS)
+        print(f"[{regime}] value warmup ({warmup}) + PPO fine-tune ({total}) ...",
+              flush=True)
+        out = _run_agent_stage(
+            [sys.executable, imitation_py, "finetune",
+             "--bc-checkpoint", str(bc_ckpt),
+             "--checkpoint", str(bc_ppo_ckpt),
+             "--trajectory-csv",
+             str(RESULTS_DIR / f"imitation_trajectory_{regime}.csv"),
+             "--rewards-csv",
+             str(RESULTS_DIR / f"imitation_finetune_rewards_{regime}.csv"),
+             "--warmup-steps", str(warmup), "--total-steps", str(total),
+             "--rollout-steps", "500", "--seed", str(args.train_seed),
+             *env_args],
+            f"{regime} finetune")
+        print("\n".join(out.splitlines()[-2:]), flush=True)
+    else:
+        print(f"[{regime}] reusing fine-tuned checkpoint {bc_ppo_ckpt}")
+
+
+def bc_q_offset(regime: str, gamma: float = DQN_GAMMA) -> float:
+    """Return-scale Q-value offset for the BC-initialised DQN of a cell.
+
+    The BC policy's logits are O(1) while returns are O(-10^2..-10^3);
+    a constant added to every Q(s, a) is argmax-invariant, so shifting
+    the loaded logits by the BC policy's own measured value scale —
+    mean step reward / (1 - gamma), from the committed Phase 8
+    imitation_raw.csv eval rows — lets TD refine the value surface
+    instead of rebuilding it through the wrong scale.
+
+    Args:
+        regime: Imitation cell name (must have bc rows in the CSV).
+        gamma: Discount factor of the DQN.
+
+    Returns:
+        The offset (a large negative number for these cells).
+
+    Raises:
+        RuntimeError: If the committed CSV has no bc rows for the cell.
+    """
+    with open(IMITATION_RAW_CSV, newline="", encoding="utf-8") as fp:
+        rows = [r for r in csv.DictReader(fp)
+                if r["regime"] == regime and r["policy"] == "bc"]
+    if not rows:
+        raise RuntimeError(f"no committed bc rows for {regime} in "
+                           f"{IMITATION_RAW_CSV}")
+    steps = int(OFFPOLICY_CONFIGS[regime].episode_steps or "200")
+    mean_reward = np.mean([float(r["reward"]) for r in rows])
+    return float(mean_reward / steps / (1.0 - gamma))
+
+
+def run_offpolicy_pipeline(regime: str, c2n: str, coherence: CoherenceConfig,
+                           args: argparse.Namespace) -> None:
+    """Train the dqn-scratch and dqn-bc arms of one cell (Phase 9).
+
+    Each arm trains in its own subprocess (agent/dqn.py owns a gym
+    env); existing checkpoints are reused unless --retrain. The dqn-bc
+    arm requires the committed Phase 8 BC checkpoint of the cell. Each
+    run's trajectory (switches, Q-gap, epsilon, TD loss per 500-step
+    window) and episode rewards are written to results/ as CSVs.
+
+    Args:
+        regime: Cell name (an OFFPOLICY_CONFIGS key).
+        c2n: Turbulence strength of the cell.
+        coherence: Env sweep point of the cell.
+        args: Orchestrator CLI namespace (quick/retrain/train knobs).
+    """
+    CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
+    dqn_py = str(_AGENT_DIR / "dqn.py")
+    env_args = ["--c2n", c2n, *_coherence_cli_args(coherence)]
+    total = 1000 if args.quick else (args.train_steps or OFFPOLICY_TRAIN_STEPS)
+    scale = total / OFFPOLICY_TRAIN_STEPS
+
+    for arm in OFFPOLICY_POLICIES:
+        checkpoint = CHECKPOINTS_DIR / f"{arm.replace('-', '_')}_{regime}.pt"
+        if not args.retrain and checkpoint.exists():
+            print(f"[{regime}] reusing checkpoint {checkpoint}")
+            continue
+        eps_start, eps_end, eps_decay = (DQN_BC_EPS if arm == "dqn-bc"
+                                         else DQN_SCRATCH_EPS)
+        cmd = [sys.executable, dqn_py, "train",
+               "--checkpoint", str(checkpoint),
+               "--trajectory-csv",
+               str(RESULTS_DIR / f"offpolicy_trajectory_{arm}_{regime}.csv"),
+               "--rewards-csv",
+               str(RESULTS_DIR / f"offpolicy_rewards_{arm}_{regime}.csv"),
+               "--total-steps", str(total),
+               "--eps-start", eps_start, "--eps-end", eps_end,
+               "--eps-decay-steps", str(max(1, int(eps_decay * scale))),
+               "--seed", str(args.train_seed), *env_args]
+        if arm == "dqn-bc":
+            bc_ckpt = CHECKPOINTS_DIR / f"bc_{regime}.pt"
+            if not bc_ckpt.exists():
+                raise RuntimeError(
+                    f"missing committed Phase 8 BC checkpoint {bc_ckpt} "
+                    f"(needed to initialise {arm})")
+            cmd += ["--bc-checkpoint", str(bc_ckpt),
+                    "--q-offset", f"{bc_q_offset(regime):.6g}"]
+        print(f"[{regime}] training {arm} for {total} steps "
+              f"(eps {eps_start} -> {eps_end}) ...", flush=True)
+        out = _run_agent_stage(cmd, f"{regime} {arm}")
+        print("\n".join(out.splitlines()[-2:]), flush=True)
 
 
 def eval_env_policies(regime: str, policies: list[str], episodes: int,
@@ -672,11 +896,15 @@ def parse_args() -> argparse.Namespace:
         The parsed namespace.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--study", choices=("turbulence", "correlated", "adaptation"),
+    parser.add_argument("--study", choices=("turbulence", "correlated",
+                                            "adaptation", "imitation",
+                                            "offpolicy"),
                         default="turbulence",
                         help="turbulence: Phase 5 C2n sweep (default); "
                              "correlated: Phase 6 coherence-time sweep; "
-                             "adaptation: Phase 7 disjoint-topology study")
+                             "adaptation: Phase 7 disjoint-topology study; "
+                             "imitation: Phase 8 imitation-then-RL study; "
+                             "offpolicy: Phase 9 Double DQN study")
     parser.add_argument("--regime", action="append",
                         choices=(sorted(REGIMES) + sorted(COHERENCE_CONFIGS)
                                  + sorted(ADAPTATION_CONFIGS)),
@@ -731,7 +959,23 @@ def main() -> None:
 
     correlated = args.study == "correlated"
     adaptation = args.study == "adaptation"
-    if correlated:
+    imitation = args.study == "imitation"
+    offpolicy = args.study == "offpolicy"
+    if offpolicy:
+        selected = args.regime or list(OFFPOLICY_CONFIGS)
+        cells = [(name, CORRELATED_C2N, OFFPOLICY_CONFIGS[name])
+                 for name in OFFPOLICY_CONFIGS if name in selected]
+        base_policies = OFFPOLICY_POLICIES
+        raw_csv = OFFPOLICY_RAW_CSV
+        train_steps = {}
+    elif imitation:
+        selected = args.regime or list(IMITATION_CONFIGS)
+        cells = [(name, CORRELATED_C2N, IMITATION_CONFIGS[name])
+                 for name in IMITATION_CONFIGS if name in selected]
+        base_policies = IMITATION_POLICIES
+        raw_csv = IMITATION_RAW_CSV
+        train_steps = {}
+    elif correlated:
         selected = args.coherence or list(COHERENCE_CONFIGS)
         cells = [(name, CORRELATED_C2N, COHERENCE_CONFIGS[name])
                  for name in COHERENCE_CONFIGS if name in selected]
@@ -778,8 +1022,20 @@ def main() -> None:
 
         cell_policies = [p for p in policies
                          if not (p == "ppo-stack" and regime in STACK_SKIP_REGIMES)]
-        for variant in [p for p in cell_policies
-                        if p.startswith("ppo") and p != "ppo-transfer"]:
+        if imitation:
+            start = time.monotonic()
+            run_imitation_pipeline(regime, c2n, coherence, args)
+            timings.append((regime, "imitation-pipeline",
+                            time.monotonic() - start))
+        if offpolicy:
+            start = time.monotonic()
+            run_offpolicy_pipeline(regime, c2n, coherence, args)
+            timings.append((regime, "offpolicy-pipeline",
+                            time.monotonic() - start))
+        train_variants = [] if (imitation or offpolicy) else [
+            p for p in cell_policies
+            if p.startswith("ppo") and p != "ppo-transfer"]
+        for variant in train_variants:
             checkpoint = (CHECKPOINTS_DIR /
                           f"{variant.replace('-', '_')}_{regime}.pt")
             if args.retrain or not checkpoint.exists():
