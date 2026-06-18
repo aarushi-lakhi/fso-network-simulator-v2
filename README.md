@@ -101,7 +101,18 @@ the **only quadrant where switching survives** (stable 18 switches/ep over 80k s
 noise kills it faster than PPO. The binding constraint is the noise-to-action-gap
 ratio, the scripted teacher remains unbeaten, and the standing hypothesis is that the
 teacher's *hysteresis state* — the currently-held route — simply isn't in the
-observation. Full paired analysis and trajectory plots in
+observation.
+
+**Phase 10 confirmed the hypothesis and closed the arc.** Appending a 4-dim one-hot of
+the current route to the observation (28→32) lifted behavior-cloning accuracy from its
+0.63 structural cap to 0.92+ — and the route-aware clone became the first learned
+policy to match the teacher (41 vs 46 switches/ep, reward statistically tied) and to
+**beat the best static route significantly** (UDP: +99.9 reward, 7/0/3 paired,
+p≈0.03). Even RL improved: route-aware BC-initialized DQN turned Phase 9's tie into a
+borderline win (+74.3, 8/2). What observability did *not* fix: TCP's return noise
+still defeats every optimizer, and no method finds switching from scratch. Final
+ranking where learning works: teacher ≈ BC-clone > DQN fine-tune > best static route.
+Full analysis across all four studies in
 [`benchmarks/results/README.md`](benchmarks/results/README.md).
 
 ## Repository layout
