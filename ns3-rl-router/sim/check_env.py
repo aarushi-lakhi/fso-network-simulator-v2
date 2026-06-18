@@ -59,6 +59,11 @@ def main() -> int:
     parser.add_argument("--traffic-protocol", type=str, default=None,
                         choices=["udp", "tcp"],
                         help="override the 0->3 flow's transport")
+    parser.add_argument("--route-in-obs", type=str, default=None,
+                        choices=["true", "false"],
+                        help="override the route-aware observation flag "
+                             "(true appends a current-route one-hot, "
+                             "obs 28 -> 32)")
     args = parser.parse_args()
 
     add_gym_msg_path(args.ns3_path)
@@ -78,6 +83,8 @@ def main() -> int:
         settings["topology"] = args.topology
     if args.traffic_protocol is not None:
         settings["trafficProtocol"] = args.traffic_protocol
+    if args.route_in_obs is not None:
+        settings["routeInObs"] = args.route_in_obs
     # Size the episode so the last step consumes the simulation-end state,
     # exercising the clean done=True termination path
     settings["episodeSteps"] = str(args.steps)
@@ -94,18 +101,22 @@ def main() -> int:
         print(f"observation space: {env.observation_space}")
         print(f"action space:      {env.action_space}")
 
+        route_aware = settings.get("routeInObs") == "true"
         obs, _ = env.reset()
         obs = np.asarray(obs)
         print(f"reset: obs shape={obs.shape} dtype={obs.dtype}")
         print(f"  obs[link0] (snrMarginDb, linkPer, scintIndex, queuePkts) "
               f"= {np.round(obs[:4], 4)}")
+        if route_aware:
+            print(f"  obs[route one-hot] = {obs[-4:]}")
 
         for step in range(args.steps):
             action = int(rng.integers(env.action_space.n))
             obs, reward, done, truncated, info = env.step(action)
             obs = np.asarray(obs)
+            onehot = f" route-onehot={obs[-4:]}" if route_aware else ""
             print(f"step {step:2d}: action={action} reward={reward:8.3f} "
-                  f"done={done} obs shape={obs.shape} "
+                  f"done={done} obs shape={obs.shape}{onehot} "
                   f"info={info.get('info', '')}")
             if done:
                 print("episode finished (simulation end)")
