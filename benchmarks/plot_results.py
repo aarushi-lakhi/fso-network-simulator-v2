@@ -1,14 +1,18 @@
-"""Publication-quality plots of the Phase 5 benchmark summary.
+"""Publication-quality plots of the benchmark summaries.
 
-Reads results/summary.csv (written by parse_traces.py) and renders four
+Reads a summary CSV (written by parse_traces.py) and renders four
 grouped bar charts — PDR, mean delay, PHY drops, and episode reward per
-turbulence regime per policy, with +/- 1 std error bars — into
-results/plots/. Styling follows prototype/turbulence_plots.py; the
+sweep point per policy, with +/- 1 std error bars — into results/plots/.
+``--study turbulence`` (default) plots the Phase 5 C2n sweep from
+results/summary.csv; ``--study correlated`` plots the Phase 6 fading
+coherence-time sweep from results/correlated_summary.csv (files prefixed
+``correlated_``). Styling follows prototype/turbulence_plots.py; the
 categorical palette is Okabe-Ito-derived and colorblind-validated
 (adjacent-pair CVD deltaE >= 12).
 
 Typical usage:
     $ python plot_results.py
+    $ python plot_results.py --study correlated
     $ python plot_results.py --summary path/to/summary.csv
 """
 
@@ -25,7 +29,19 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 PLOTS_DIR = RESULTS_DIR / "plots"
 
 REGIME_ORDER = ("weak", "moderate", "strong")
-REGIME_C2N = {"weak": "1e-17", "moderate": "1e-15", "strong": "1e-13"}
+REGIME_LABELS = {
+    "weak": "weak\nC²ₙ = 1e-17 m⁻²ᐟ³",
+    "moderate": "moderate\nC²ₙ = 1e-15 m⁻²ᐟ³",
+    "strong": "strong\nC²ₙ = 1e-13 m⁻²ᐟ³",
+}
+
+# Phase 6 correlated-fading study (strong turbulence throughout)
+COHERENCE_ORDER = ("iid", "tau100-20", "tau500-100")
+COHERENCE_LABELS = {
+    "iid": "i.i.d.\nτ = 0 (control)",
+    "tau100-20": "τ_L/τ_S = 100/20 ms\n50 ms steps",
+    "tau500-100": "τ_L/τ_S = 500/100 ms\n100 ms steps",
+}
 
 # Fixed policy -> color assignment (identity encoding, never re-ranked)
 POLICY_COLORS = {
@@ -97,8 +113,12 @@ def plot_metric(
     ylabel: str,
     filename: str,
     save: bool = True,
+    x_order: tuple[str, ...] = REGIME_ORDER,
+    x_labels: dict[str, str] | None = None,
+    x_axis_label: str = "Turbulence regime",
+    subtitle: str = "10 episodes, shared seeds",
 ) -> plt.Figure:
-    """Render one grouped bar chart (regimes on x, one bar per policy).
+    """Render one grouped bar chart (sweep points on x, one bar per policy).
 
     Args:
         table: Summary rows from :func:`load_summary`.
@@ -107,14 +127,19 @@ def plot_metric(
         ylabel: y-axis label (states the better direction).
         filename: Output file name under results/plots/.
         save: If True, save the PNG.
+        x_order: Sweep point (``regime`` column) display order.
+        x_labels: Sweep point tick labels; defaults to REGIME_LABELS.
+        x_axis_label: x-axis title.
+        subtitle: Trailing fragment of the figure title.
 
     Returns:
         The matplotlib Figure.
     """
     _apply_base_style()
+    x_labels = REGIME_LABELS if x_labels is None else x_labels
     policies = [p for p in POLICY_COLORS
-                if any((r, p) in table for r in REGIME_ORDER)]
-    regimes = [r for r in REGIME_ORDER
+                if any((r, p) in table for r in x_order)]
+    regimes = [r for r in x_order
                if any((r, p) in table for p in policies)]
 
     fig, ax = plt.subplots(figsize=(9, 5.5))
@@ -140,12 +165,10 @@ def plot_metric(
                zorder=3)
 
     ax.set_xticks(x)
-    ax.set_xticklabels([f"{r}\nC²ₙ = {REGIME_C2N.get(r, '?')} m⁻²ᐟ³"
-                        for r in regimes])
-    ax.set_xlabel("Turbulence regime")
+    ax.set_xticklabels([x_labels.get(r, r) for r in regimes])
+    ax.set_xlabel(x_axis_label)
     ax.set_ylabel(ylabel)
-    ax.set_title(f"{title} — 0→3 flow, 5-node FSO mesh, "
-                 "10 episodes, shared seeds")
+    ax.set_title(f"{title} — 0→3 flow, 5-node FSO mesh, {subtitle}")
     ax.axhline(0.0, color="black", lw=0.8, zorder=4)
     ax.legend(loc="best", framealpha=0.85, ncols=2)
     fig.tight_layout()
@@ -161,14 +184,26 @@ def plot_metric(
 def main() -> None:
     """CLI entry point: render all four benchmark charts."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--summary", type=str,
-                        default=str(RESULTS_DIR / "summary.csv"),
+    parser.add_argument("--study", choices=("turbulence", "correlated"),
+                        default="turbulence",
+                        help="picks the default summary file, x-axis, and "
+                             "output file prefix")
+    parser.add_argument("--summary", type=str, default=None,
                         help="input summary CSV")
     args = parser.parse_args()
 
-    table = load_summary(args.summary)
+    correlated = args.study == "correlated"
+    default_summary = "correlated_summary.csv" if correlated else "summary.csv"
+    table = load_summary(args.summary or str(RESULTS_DIR / default_summary))
     for metric, title, ylabel, filename in METRIC_SPECS:
-        plot_metric(table, metric, title, ylabel, filename)
+        if correlated:
+            plot_metric(table, metric, title, ylabel, f"correlated_{filename}",
+                        x_order=COHERENCE_ORDER, x_labels=COHERENCE_LABELS,
+                        x_axis_label="Fading coherence time "
+                                     "(strong turbulence, C²ₙ = 1e-13 m⁻²ᐟ³)",
+                        subtitle="10 episodes, shared seeds")
+        else:
+            plot_metric(table, metric, title, ylabel, filename)
     plt.close("all")
 
 
