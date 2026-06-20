@@ -87,7 +87,7 @@ def main() -> int:
         obs, _ = env.reset()
         obs = np.asarray(obs)
         print(f"reset: obs shape={obs.shape} dtype={obs.dtype}")
-        print(f"  obs[link0] (snrMarginDb, dropRate, scintIndex, queuePkts) "
+        print(f"  obs[link0] (snrMarginDb, linkPer, scintIndex, queuePkts) "
               f"= {np.round(obs[:4], 4)}")
 
         for step in range(args.steps):
