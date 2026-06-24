@@ -18,12 +18,22 @@ results/imitation_trajectory_<regime>.csv;
 results/offpolicy_summary.csv (prefix ``offpolicy_``) plus its own
 trajectory chart — greedy switch rate, Q-gap, and TD loss per update
 for all four DQN runs — from
-results/offpolicy_trajectory_<arm>_<regime>.csv. Styling follows
-prototype/turbulence_plots.py; the categorical palette is
+results/offpolicy_trajectory_<arm>_<regime>.csv;
+``--study routeaware`` plots the Phase 10 study from
+results/routeaware_summary.csv (prefix ``routeaware_``) plus a
+trajectory chart — greedy switch rate for all six route-aware training
+runs, policy entropy for the PPO fine-tunes, and Q-gap for the DQN
+arms — from results/routeaware_trajectory_<arm>_<regime>.csv. Styling
+follows prototype/turbulence_plots.py; the categorical palette is
 Okabe-Ito-derived and colorblind-validated (adjacent-pair CVD
 deltaE >= 12; the Phase 8 additions bc/bc-ppo were validated all-pairs
 against every co-plotted policy color; the Phase 9 additions
-dqn-scratch/dqn-bc use Paul Tol's colorblind-safe indigo and sand).
+dqn-scratch/dqn-bc use Paul Tol's colorblind-safe indigo and sand; the
+Phase 10 route-aware arms reuse their 28-dim counterpart's hue family
+at a clearly darker/lighter value where the warm axis allows —
+dqn-bc-route takes a dark slate cyan instead, the warm hues being
+exhausted — validated all-pairs at simulated-CVD deltaE >= 12.5
+against every co-plotted color).
 
 Typical usage:
     $ python plot_results.py
@@ -80,6 +90,10 @@ POLICY_COLORS = {
     "bc-ppo": "#E07126",
     "dqn-scratch": "#332288",
     "dqn-bc": "#DDCC77",
+    "bc-route": "#5C1237",
+    "bc-ppo-route": "#8C3A0F",
+    "dqn-scratch-route": "#9C93E8",
+    "dqn-bc-route": "#14505C",
     "ppo-transfer": "#56B4E9",
     "best-static": "#009E73",
     "greedy-per": "#999999",
@@ -96,6 +110,10 @@ POLICY_LABELS = {
     "bc-ppo": "BC + PPO fine-tune",
     "dqn-scratch": "Double DQN (scratch)",
     "dqn-bc": "Double DQN (BC-init)",
+    "bc-route": "BC (route-aware obs)",
+    "bc-ppo-route": "BC + PPO fine-tune (route-aware)",
+    "dqn-scratch-route": "Double DQN scratch (route-aware)",
+    "dqn-bc-route": "Double DQN BC-init (route-aware)",
     "ppo-transfer": "PPO (1e-13 ckpt)",
     "best-static": "Best static route",
     "greedy-per": "Greedy PER (scripted)",
@@ -134,6 +152,29 @@ OFFPOLICY_TRAJECTORY_STYLES = {
         ("#D55E00", "-", "TCP, scratch"),
     ("dqn-bc", "disjoint-tau500-tcp"):
         ("#D55E00", "--", "TCP, BC-init"),
+}
+
+# Phase 10 route-aware study: same two cells, six training runs. Bars
+# pair each route-aware arm with its 28-dim counterpart; the trajectory
+# figure encodes color = cell, line style = arm.
+ROUTEAWARE_ORDER = IMITATION_ORDER
+ROUTEAWARE_PLOT_POLICIES = ("bc", "bc-route", "bc-ppo", "bc-ppo-route",
+                            "dqn-scratch", "dqn-scratch-route", "dqn-bc",
+                            "dqn-bc-route", "best-static", "greedy-per")
+ROUTEAWARE_ARMS = ("bc-ppo-route", "dqn-scratch-route", "dqn-bc-route")
+ROUTEAWARE_TRAJECTORY_STYLES = {
+    ("bc-ppo-route", "disjoint-tau500-udp"):
+        ("#0072B2", "-", "UDP, BC + PPO"),
+    ("dqn-bc-route", "disjoint-tau500-udp"):
+        ("#0072B2", "--", "UDP, DQN BC-init"),
+    ("dqn-scratch-route", "disjoint-tau500-udp"):
+        ("#0072B2", ":", "UDP, DQN scratch"),
+    ("bc-ppo-route", "disjoint-tau500-tcp"):
+        ("#D55E00", "-", "TCP, BC + PPO"),
+    ("dqn-bc-route", "disjoint-tau500-tcp"):
+        ("#D55E00", "--", "TCP, DQN BC-init"),
+    ("dqn-scratch-route", "disjoint-tau500-tcp"):
+        ("#D55E00", ":", "TCP, DQN scratch"),
 }
 
 METRIC_SPECS = (
@@ -435,12 +476,79 @@ def plot_offpolicy_trajectory(
     return fig
 
 
+def plot_routeaware_trajectory(
+    trajectories: dict[tuple[str, str], dict[str, list]],
+    filename: str = "routeaware_trajectory.png",
+    save: bool = True,
+) -> plt.Figure:
+    """Render the Phase 10 route-aware training trajectory.
+
+    Three stacked panels over training updates (500 env steps each):
+    the greedy policy's switch rate for all six route-aware runs, the
+    policy entropy of the PPO fine-tunes (does the route one-hot stop
+    the Phase 8 entropy drain?), and the mean Q-gap of the DQN arms
+    (does it stop the Phase 9 TCP gap erasure?). Reference lines mark
+    the teacher's eval switch rate and the Phase 7c collapse entropy.
+
+    Args:
+        trajectories: Mapping of (arm, regime) to trajectory columns
+            (from :func:`load_trajectory`).
+        filename: Output file name under results/plots/.
+        save: If True, save the PNG.
+
+    Returns:
+        The matplotlib Figure.
+    """
+    _apply_base_style()
+    fig, axes = plt.subplots(3, 1, figsize=(9, 9), sharex=True)
+    ax_switch, ax_entropy, ax_gap = axes
+
+    for (arm, regime), cols in trajectories.items():
+        color, linestyle, label = ROUTEAWARE_TRAJECTORY_STYLES.get(
+            (arm, regime), ("#0072B2", "-", f"{arm} {regime}"))
+        updates = np.asarray(cols["update"], dtype=float)
+        ax_switch.plot(updates, cols["greedy_switches_per_200"], color=color,
+                       linestyle=linestyle, lw=2, label=label)
+        if "entropy" in cols:
+            ax_entropy.plot(updates, cols["entropy"], color=color,
+                            linestyle=linestyle, lw=2, label=label)
+        if "mean_q_gap" in cols:
+            ax_gap.plot(updates, cols["mean_q_gap"], color=color,
+                        linestyle=linestyle, lw=2, label=label)
+
+    ax_switch.axhline(46.0, color="#666666", lw=1, linestyle=":")
+    ax_switch.annotate("teacher (46/ep)", xy=(0.99, 46.0),
+                       xycoords=("axes fraction", "data"),
+                       ha="right", va="bottom", fontsize=9, color="#666666")
+    ax_entropy.axhline(0.005, color="#666666", lw=1, linestyle=":")
+    ax_entropy.annotate("Phase 7c collapse (0.005)", xy=(0.99, 0.005),
+                        xycoords=("axes fraction", "data"),
+                        ha="right", va="bottom", fontsize=9, color="#666666")
+
+    ax_switch.set_ylabel("Greedy switches / 200 steps")
+    ax_entropy.set_ylabel("Policy entropy [nats]\n(PPO fine-tunes)")
+    ax_gap.set_ylabel("Mean Q-gap (best − 2nd)\n(DQN arms)")
+    ax_gap.set_xlabel("Update (500 env steps each)")
+    for ax in axes:
+        ax.legend(loc="best", framealpha=0.85, ncols=2)
+    ax_switch.set_title("Route-aware training on the correlated cells — "
+                        "does observability preserve switching?")
+    fig.tight_layout()
+
+    if save:
+        PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+        out = PLOTS_DIR / filename
+        fig.savefig(out, bbox_inches="tight")
+        print(f"[saved] {out}")
+    return fig
+
+
 def main() -> None:
     """CLI entry point: render all four benchmark charts."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--study", choices=("turbulence", "correlated",
                                             "adaptation", "imitation",
-                                            "offpolicy"),
+                                            "offpolicy", "routeaware"),
                         default="turbulence",
                         help="picks the default summary file, x-axis, and "
                              "output file prefix")
@@ -452,9 +560,28 @@ def main() -> None:
                 "correlated": "correlated_summary.csv",
                 "adaptation": "adaptation_summary.csv",
                 "imitation": "imitation_summary.csv",
-                "offpolicy": "offpolicy_summary.csv"}
+                "offpolicy": "offpolicy_summary.csv",
+                "routeaware": "routeaware_summary.csv"}
     table = load_summary(args.summary or str(RESULTS_DIR / defaults[args.study]))
-    if args.study == "offpolicy":
+    if args.study == "routeaware":
+        for metric, title, ylabel, filename in (*METRIC_SPECS,
+                                                *ADAPTATION_EXTRA_SPECS):
+            plot_metric(table, metric, title, ylabel, f"routeaware_{filename}",
+                        x_order=ROUTEAWARE_ORDER, x_labels=ADAPTATION_LABELS,
+                        x_axis_label="Environment config (disjoint topology, "
+                                     "C²ₙ = 1e-13 m⁻²ᐟ³)",
+                        subtitle="10 episodes, shared seeds",
+                        policies=ROUTEAWARE_PLOT_POLICIES)
+        trajectories = {
+            (arm, regime): load_trajectory(path)
+            for arm in ROUTEAWARE_ARMS
+            for regime in ROUTEAWARE_ORDER
+            if (path := RESULTS_DIR /
+                f"routeaware_trajectory_{arm}_{regime}.csv").exists()
+        }
+        if trajectories:
+            plot_routeaware_trajectory(trajectories)
+    elif args.study == "offpolicy":
         for metric, title, ylabel, filename in (*METRIC_SPECS,
                                                 *ADAPTATION_EXTRA_SPECS):
             plot_metric(table, metric, title, ylabel, f"offpolicy_{filename}",

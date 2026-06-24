@@ -102,6 +102,7 @@ def make_ns3_env(
     episode_steps: int | None = None,
     topology: str | None = None,
     traffic_protocol: str | None = None,
+    route_in_obs: str | None = None,
 ) -> gym.Env:
     """Create the real FSO routing environment backed by ns-3.
 
@@ -126,9 +127,13 @@ def make_ns3_env(
             or ``"disjoint"``, see sim/README.md).
         traffic_protocol: Optional override of the 0->3 flow's
             transport (``"udp"`` or ``"tcp"``).
+        route_in_obs: Optional override of the route-aware observation
+            flag (``"true"``/``"false"``). When true the env appends a
+            one-hot of the currently held route (obs 28 -> 32).
 
     Returns:
-        A Gymnasium env with Box(28) observations and Discrete(4) actions.
+        A Gymnasium env with Box(28) observations (Box(32) when
+        ``route_in_obs`` is true) and Discrete(4) actions.
     """
     config = load_flat_yaml(config_path)
     sim_seed = seed if seed is not None else int(config.get("sim_seed", "1"))
@@ -141,6 +146,7 @@ def make_ns3_env(
         "episodeSteps": episode_steps,
         "topology": topology,
         "trafficProtocol": traffic_protocol,
+        "routeInObs": route_in_obs,
     }
     for key, value in overrides.items():
         if value is not None:

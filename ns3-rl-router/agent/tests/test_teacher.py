@@ -11,6 +11,7 @@ from teacher import (
     PENTAGON_ROUTE_LINKS,
     PER_FEATURE,
     GreedyPerTeacher,
+    held_route_from_obs,
     route_links_for,
 )
 
@@ -22,6 +23,13 @@ def obs_with_per(per: list[float]) -> np.ndarray:
     obs = np.zeros((N_LINKS, LINK_FEATURES), dtype=np.float64)
     obs[:, PER_FEATURE] = per
     return obs.reshape(-1)
+
+
+def route_aware(obs: np.ndarray, route: int, n_routes: int = 4) -> np.ndarray:
+    """Append a route one-hot to a flat observation (the env's Phase 10 tail)."""
+    onehot = np.zeros(n_routes, dtype=np.float64)
+    onehot[route] = 1.0
+    return np.concatenate([obs, onehot])
 
 
 class TestRouteTables:
@@ -93,3 +101,50 @@ class TestGreedyPerTeacher:
             obs = obs_with_per(list(rng.uniform(0.01, 1, N_LINKS)))
             action = teacher.act(obs)
             assert action == int(np.argmin(teacher.route_costs(obs)))
+
+    def test_route_costs_ignore_appended_onehot(self):
+        teacher = GreedyPerTeacher(DISJOINT_ROUTE_LINKS)
+        obs = obs_with_per([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        for route in range(4):
+            np.testing.assert_array_equal(
+                teacher.route_costs(route_aware(obs, route)),
+                teacher.route_costs(obs))
+
+    def test_actions_identical_on_route_aware_obs(self):
+        rng = np.random.default_rng(3)
+        plain = GreedyPerTeacher(DISJOINT_ROUTE_LINKS)
+        aware = GreedyPerTeacher(DISJOINT_ROUTE_LINKS)
+        for _ in range(50):
+            obs = obs_with_per(list(rng.uniform(0, 1, N_LINKS)))
+            expected = plain.act(obs)
+            assert aware.act(route_aware(obs, aware.current)) == expected
+
+
+class TestHeldRouteFromObs:
+    def test_decodes_each_route(self):
+        obs = obs_with_per([0.5] * N_LINKS)
+        for route in range(4):
+            assert held_route_from_obs(route_aware(obs, route)) == route
+
+    def test_rejects_all_zero_tail(self):
+        import pytest
+
+        obs = np.concatenate([obs_with_per([0.0] * N_LINKS), np.zeros(4)])
+        with pytest.raises(ValueError, match="not a route one-hot"):
+            held_route_from_obs(obs)
+
+    def test_rejects_multi_hot_tail(self):
+        import pytest
+
+        obs = np.concatenate([obs_with_per([0.0] * N_LINKS),
+                              np.array([1.0, 0.0, 1.0, 0.0])])
+        with pytest.raises(ValueError, match="not a route one-hot"):
+            held_route_from_obs(obs)
+
+    def test_rejects_fractional_tail(self):
+        import pytest
+
+        obs = np.concatenate([obs_with_per([0.0] * N_LINKS),
+                              np.array([0.0, 0.5, 0.5, 0.0])])
+        with pytest.raises(ValueError, match="not a route one-hot"):
+            held_route_from_obs(obs)

@@ -41,6 +41,31 @@ LINK_FEATURES = 4
 PER_FEATURE = 1
 
 
+def held_route_from_obs(obs: np.ndarray, n_routes: int = 4) -> int:
+    """Decode the current-route one-hot a route-aware observation ends with.
+
+    The env's ``routeInObs`` flag (Phase 10) appends a one-hot of the
+    currently held route to the observation; this reads it back.
+
+    Args:
+        obs: Flat route-aware observation (one-hot in the last
+            ``n_routes`` entries).
+        n_routes: Number of candidate routes.
+
+    Returns:
+        Index of the held route.
+
+    Raises:
+        ValueError: If the observation tail is not a valid one-hot.
+    """
+    tail = np.asarray(obs, dtype=np.float64)[-n_routes:]
+    if len(tail) != n_routes or not (
+        np.count_nonzero(tail == 1.0) == 1 and np.count_nonzero(tail) == 1
+    ):
+        raise ValueError(f"observation tail {tail} is not a route one-hot")
+    return int(np.argmax(tail))
+
+
 def route_links_for(topology: str) -> tuple[tuple[int, ...], ...]:
     """Return the route->links table of a topology.
 
@@ -99,12 +124,17 @@ class GreedyPerTeacher:
         """Compute each route's summed link PER from one observation.
 
         Args:
-            obs: Flat observation (LINK_FEATURES features per link).
+            obs: Flat observation (LINK_FEATURES features per link; a
+                trailing route one-hot from the env's route-aware mode
+                is ignored — the teacher keeps its own held-route state).
 
         Returns:
             Array of shape (n_routes,) with each route's cost.
         """
-        links_view = np.asarray(obs, dtype=np.float64).reshape(-1, LINK_FEATURES)
+        n_links = 1 + max(i for links in self.route_links for i in links)
+        links_view = np.asarray(obs, dtype=np.float64)[
+            : n_links * LINK_FEATURES
+        ].reshape(-1, LINK_FEATURES)
         per = links_view[:, PER_FEATURE]
         return np.array([float(sum(per[i] for i in links))
                          for links in self.route_links])

@@ -1,4 +1,4 @@
-# Benchmark results (Phases 5–9)
+# Benchmark results (Phases 5–10)
 
 PPO routing vs classical baselines on the 5-node FSO mesh (one 2 Mbps UDP
 flow 0→3, 7 Gamma-Gamma faded links, 100-step episodes at 0.1 s/step).
@@ -471,6 +471,129 @@ checkpoints); the four trained checkpoints are committed in
 `parse_traces.py --study offpolicy [--paired]` and
 `plot_results.py --study offpolicy`.
 
+## Phase 10: the route-aware observation study
+
+Phases 7–9 left one hypothesis standing: every learned policy failed to
+express the teacher's hysteresis because the currently-held route was
+not in the observation — to a stateless policy, "hold" and "switch to
+route k" are the same action in indistinguishable states, and the
+reward gaps to the teacher were arithmetically the flap bill for that
+missing state. Phase 10 tests it directly: a `--routeInObs` env flag
+appends a one-hot of the currently held route to the observation
+(28 → 32 dims; default off, so every earlier study stays reproducible),
+and the decisive arms re-run on the widened observation in the same two
+correlated cells — **bc-route** (clone the teacher), **bc-ppo-route**
+(Phase 8 value-warmup + PPO fine-tune protocol), **dqn-scratch-route**
+and **dqn-bc-route** (Phase 9 Double DQN protocols; the BC init is this
+study's fresh 32-dim checkpoint). Machinery:
+`run_benchmark.py --study routeaware`; the one-hot's alignment with the
+teacher's held route was asserted on every collected step (5 000/5 000
+per cell — the teacher drives the env, so the one-hot *is* its
+hysteresis state). Baselines and all 28-dim counterparts below are the
+committed Phase 7/8/9 measurements, not re-runs.
+
+**The hypothesis's first prediction lands exactly.** BC validation
+accuracy jumps from the old structural cap of 0.626 (UDP) / 0.631 (TCP)
+to **0.925 / 0.921** — the cap was the missing state, nothing else. The
+clone's behavior confirms it is now a hysteresis policy, not a greedy
+argmin: 41 switches/ep instead of the 28-dim clone's 73 (teacher: 46),
+and its reward is a statistical tie with the teacher on shared seeds
+(+11.5 ± 24.3, 5/5 W/L under UDP; +22.7 ± 354.9, 7/3 under TCP). After
+four phases in which no learned policy came close, **the scripted
+teacher is matched by a learned policy** — and the gain over the 28-dim
+clone is exactly the refunded flap bill: +144.9 ± 60.4 (10/0 paired)
+under UDP against a predicted (73.3 − 41.1) × 5 ≈ 161 of flap penalty.
+
+| config | policy | reward | PDR | goodput [Mbps] | switches/ep |
+|---|---|---|---|---|---|
+| τ 500/100 ms + UDP | bc (28-dim, 8) | −618.0 ± 117.4 | 0.913 ± 0.029 | — | 73.3 |
+| τ 500/100 ms + UDP | **bc-route** | **−473.1 ± 98.5** | 0.907 ± 0.024 | — | 41.1 |
+| τ 500/100 ms + UDP | **bc-ppo-route** (≡ route 0) | −572.9 ± 140.1 | 0.776 ± 0.057 | — | 0.0 |
+| τ 500/100 ms + UDP | **dqn-scratch-route** (≡ route 0) | −572.9 ± 140.1 | 0.776 ± 0.057 | — | 0.0 |
+| τ 500/100 ms + UDP | **dqn-bc-route** | −498.6 ± 81.2 | 0.833 ± 0.033 | — | 12.3 |
+| τ 500/100 ms + UDP | dqn-bc (28-dim, 9) | −582.2 ± 115.3 | 0.811 ± 0.041 | — | 18.4 |
+| τ 500/100 ms + UDP | best static (route 0) | −572.9 ± 140.1 | 0.776 ± 0.057 | — | 0 |
+| τ 500/100 ms + UDP | greedy-PER (teacher) | −484.5 ± 113.8 | **0.914 ± 0.026** | — | 46.0 |
+| τ 500/100 ms + TCP | bc (28-dim, 8) | −1850.4 ± 548.8 | 0.918 ± 0.112 | 0.799 | 73.5 |
+| τ 500/100 ms + TCP | **bc-route** | **−1704.1 ± 606.5** | 0.926 ± 0.082 | 0.786 | 41.2 |
+| τ 500/100 ms + TCP | **bc-ppo-route** | −1920.1 ± 310.9 | 0.846 ± 0.283 | 0.506 | 16.4 |
+| τ 500/100 ms + TCP | **dqn-scratch-route** (≡ route 0) | −1897.6 ± 453.2 | 0.870 ± 0.163 | 0.451 | 0.0 |
+| τ 500/100 ms + TCP | **dqn-bc-route** (≡ route 0) | −1897.6 ± 453.2 | 0.870 ± 0.163 | 0.451 | 0.0 |
+| τ 500/100 ms + TCP | best static (route 0) | −1897.6 ± 453.2 | 0.870 ± 0.163 | 0.451 | 0 |
+| τ 500/100 ms + TCP | greedy-PER (teacher) | −1726.8 ± 569.6 | **0.928 ± 0.083** | **0.788** | 46.0 |
+
+Paired per-episode analysis (shared seeds;
+`parse_traces.py --study routeaware --paired`):
+
+| comparison | config | reward Δ | PDR Δ | W/T/L | notes |
+|---|---|---|---|---|---|
+| bc-route − best-static | UDP | +99.9 ± 112.1 | +0.131 | 7/0/3 | paired t ≈ 2.7, p ≈ 0.03 |
+| bc-route − best-static | TCP | +193.5 ± 446.5 | +0.055 | 6/0/4 | not significant (t ≈ 1.3) |
+| bc-route − greedy-per | UDP | +11.5 ± 24.3 | −0.006 | 5/0/5 | ties the teacher |
+| bc-route − greedy-per | TCP | +22.7 ± 354.9 | −0.002 | 7/0/3 | ties the teacher |
+| bc-route − bc | UDP | +144.9 ± 60.4 | −0.005 | 10/0/0 | the refunded flap bill |
+| bc-route − bc | TCP | +146.3 ± 483.3 | +0.008 | 6/0/4 | |
+| bc-ppo-route − best-static | UDP | 0.0 ± 0.0 | +0.000 | 0/10/0 | byte-identical to route 0 |
+| bc-ppo-route − best-static | TCP | −22.4 ± 302.6 | −0.024 | 6/0/4 | switching kept, no payoff |
+| dqn-scratch-route − best-static | both | 0.0 ± 0.0 | +0.000 | 0/10/0 | byte-identical to route 0 |
+| dqn-bc-route − best-static | UDP | +74.3 ± 98.8 | +0.057 | 8/0/2 | paired t ≈ 2.3, p ≈ 0.05 |
+| dqn-bc-route − best-static | TCP | 0.0 ± 0.0 | +0.000 | 0/10/0 | byte-identical to route 0 |
+| dqn-bc-route − dqn-bc | UDP | +83.6 ± 88.6 | +0.022 | 8/0/2 | the observability delta |
+
+**The verdict, arm by arm, honestly.** The hypothesis survives where it
+was about *representation* and only half-survives where it was about
+*optimization*. **bc-route** is the study's clean win: with the held
+route observable, a supervised learner reproduces the teacher's
+hysteresis (0.92+ accuracy, 41 vs 46 switches), ties the unbeaten
+teacher on paired reward in both cells, and beats best-static in the
+UDP cell (+99.9, 7/3, p ≈ 0.03) — the first learned policy in the
+series to do so. **dqn-bc-route** is the best RL result of the whole
+arc: under UDP the switching policy survives all 80k steps at a stable
+~12 switches/ep with a *growing* Q-gap (~9–10 at the end vs ~8 for the
+28-dim run), and evaluation beats best-static +74.3 (8/2, p ≈ 0.05,
+borderline) and its own 28-dim counterpart +83.6 (8/2) — observability
+converted Phase 9's statistical tie into a (borderline-significant)
+win. **dqn-scratch-route** answers its question with a clean no:
+observability alone does not let epsilon-greedy exploration *find*
+switching; both cells collapse byte-identically onto route 0, exactly
+as in Phase 9 — the exploration wall stands. **bc-ppo-route** shows the
+on-policy gradient's verdict is also unchanged in kind, only in speed:
+the UDP fine-tune holds 40–60 greedy switches for ~100 updates (Phase 8
+was in monotonic decline from the start and dead by update 93) but then
+drains and hits the same attractor at update ~150 — entropy 0.10 → 5e-5
+within five updates, zero switches, byte-identical to route 0. The TCP
+fine-tune, for the first time, *never fully collapses* (entropy ends at
+0.13, 16.4 switches/ep at eval) — but the retained switching earns no
+reward: a statistical tie with best-static (−22.4, 6/4) and strictly
+worse than its own bc-route initialisation (−1920.1 vs −1704.1).
+
+The TCP DQN failure mode is byte-for-byte the Phase 9 one, and the
+route one-hot does not touch it: greedy switches 47 → 1 within three
+updates (1.5k env steps), the BC-initialised Q-gap eroded from ~4.3 to
+~0.8 immediately and pinned at ~0.2 from update ~80 on, then the
+route-0-only replay buffer sealed the estimate forever. That is the
+predicted outcome: the erasure was diagnosed as per-step TD noise
+exceeding the inter-action value gap — a value-scale problem the
+observation cannot fix.
+
+What Phase 10 settles. (1) The 0.63 BC cap, the 73-switch flapping, and
+the clone-to-teacher reward gaps of Phases 8–9 were purely the missing
+hysteresis state — with it observable, cloning is essentially solved
+(`plots/routeaware_trajectory.png` and the `routeaware_*` CSVs carry
+the trajectories). (2) Best-static is finally beaten by learned
+policies, but only in the UDP cell, and the honest ranking there is
+teacher ≈ bc-route > dqn-bc-route > best-static: imitation collects
+almost the whole adaptation margin, RL fine-tuning keeps at most a
+diminished slice of it. (3) Neither RL pathology was cured by
+observability: on-policy entropy drain still ends in the constant-route
+attractor when the return noise is high (UDP), and off-policy TD
+erasure still destroys the policy when per-step value noise exceeds the
+action gap (TCP). The optimizer conclusions of Phases 8–9 were about
+noise, not information — Phase 10 confirms that by elimination. What it
+leaves open, deliberately: variance reduction (seed-paired baselines,
+many-episode updates) on the route-aware observation is now the only
+untested lever left from the Phase 8 list.
+
 ## Reproducing
 
 ```bash
@@ -510,6 +633,15 @@ The Phase 9 study: `python run_benchmark.py --study offpolicy` (then
 from the committed `adaptation_raw.csv` and `imitation_raw.csv`; only
 the dqn-scratch/dqn-bc rows are measured by this study, and the dqn-bc
 arm initialises from the committed Phase 8 `bc_<cell>.pt` checkpoints.
+
+The Phase 10 study: `python run_benchmark.py --study routeaware` (then
+`parse_traces.py --study routeaware [--paired]` and `plot_results.py
+--study routeaware`). Trains all four route-aware arms per cell
+(~18 min/cell) and evaluates them on the shared seeds; the parser and
+plots pull the baselines and 28-dim counterparts from the committed
+Phase 7/8/9 CSVs. The eight trained checkpoints are committed in
+`results/checkpoints/` (57–170 KB each); the BC datasets regenerate
+via `--retrain`.
 
 `run_benchmark.py --quick` smoke-tests the pipeline in ~1 min;
 `--regime`/`--policy` re-run a single cell (rows are replaced in place).
