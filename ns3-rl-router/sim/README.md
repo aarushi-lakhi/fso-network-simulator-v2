@@ -60,6 +60,14 @@ features per link, links in install order — pentagon
 | `4i+2` | `scintIndex` | `1/α + 1/β + 1/(αβ)` from the loss model's α, β at the current `C2n` and link distance |
 | `4i+3` | `queuePkts` | packets waiting in the two device TX queues |
 
+With `routeInObs=true` (Phase 10; `route_in_obs` in sim_config.yaml) a
+one-hot of the currently held route is appended — `obs[28+r]` is `1.0`
+for the route installed while this step's channel state was measured
+(the initial route at episode start) — widening the space to
+`shape=[32]`. Phases 7–9 showed hold-vs-switch is indistinguishable to
+a stateless policy without this state; the flag defaults to `false` so
+earlier studies stay reproducible.
+
 **Action** — `Discrete(4)`: route of the 0→3 flow, applied as
 `Ipv4StaticRouting` host routes on every node along the path (stale host
 routes are removed first; under TCP the reverse ACK routes are chained

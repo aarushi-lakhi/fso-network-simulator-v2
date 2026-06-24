@@ -298,3 +298,30 @@ def test_single_episode_std_is_zero(tmp_path: Path) -> None:
     summary = summarize(load_raw(path))
     assert summary[0]["reward_std"] == 0.0
     assert summary[0]["n_episodes"] == 1
+
+
+def test_dataset_q_offset_matches_hand_computation(tmp_path: Path) -> None:
+    import numpy as np
+
+    from run_benchmark import dataset_q_offset
+
+    dataset = tmp_path / "bc_dataset_route.npz"
+    np.savez_compressed(dataset,
+                        episode_rewards=np.array([-500.0, -460.0, -480.0]))
+    # mean -480 over 200 steps -> -2.4/step; / (1 - 0.99) = -240
+    assert dataset_q_offset(dataset, 200, gamma=0.99) == pytest.approx(-240.0)
+
+
+def test_routeaware_configs_flag_the_observation() -> None:
+    from run_benchmark import IMITATION_CONFIGS, ROUTEAWARE_CONFIGS
+
+    assert set(ROUTEAWARE_CONFIGS) == set(IMITATION_CONFIGS)
+    for name, config in ROUTEAWARE_CONFIGS.items():
+        assert config.route_in_obs == "true"
+        # everything but the observation flag matches the Phase 8 cell
+        base = IMITATION_CONFIGS[name]
+        assert (config.coherence_large, config.coherence_small,
+                config.step_time_s, config.episode_steps, config.topology,
+                config.traffic_protocol) == (
+            base.coherence_large, base.coherence_small, base.step_time_s,
+            base.episode_steps, base.topology, base.traffic_protocol)

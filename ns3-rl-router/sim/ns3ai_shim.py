@@ -105,6 +105,7 @@ def ns3_settings(config: dict[str, str], seed: int) -> dict[str, str]:
         "flapPenalty": config["reward_flap_penalty"],
         "energyWeight": config["reward_energy_weight"],
         "goodputWeight": config.get("reward_goodput_weight", "1.0"),
+        "routeInObs": config.get("route_in_obs", "false"),
         "simSeed": str(seed),
     }
 

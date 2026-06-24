@@ -42,7 +42,9 @@
 // Ipv4StaticRouting host routes (for TCP, reverse host routes for the ACK
 // stream follow the same path).
 //
-// Observation (Box, double, shape [numLinks * 4] = [28]), for link i:
+// Observation (Box, double, shape [numLinks * 4] = [28]; with
+// --routeInObs=true a one-hot of the currently installed route is appended,
+// shape [numLinks * 4 + numRoutes] = [32]), for link i:
 //   [4i+0] snrMarginDb  mean SNR margin, TxPowerDbm - extinctionDb(d) - NoiseDbm
 //   [4i+1] linkPer      current packet error rate of the link (mean of the
 //                       two directions' RateErrorModel rates, i.e. the fading
@@ -54,6 +56,14 @@
 //                       coherence times) it predicts the link's near future.
 //   [4i+2] scintIndex   1/alpha + 1/beta + 1/(alpha*beta) at (C2n, d)
 //   [4i+3] queuePkts    packets queued in the two device TX queues
+//
+// Route one-hot (--routeInObs, Phase 10): obs[4*numLinks + r] is 1.0 for the
+// route installed while this step's channel state was measured — the route
+// the agent currently HOLDS at decision time — and 0.0 elsewhere. At episode
+// start it marks the initial route (0). Phases 7-9 showed every learned
+// policy fails to express the greedy-PER teacher's hysteresis because
+// hold-vs-switch is indistinguishable without this state; the flag defaults
+// to false so all earlier studies stay reproducible.
 //
 // Action (Discrete(4)): route for the 0->3 flow,
 //   pentagon: 0: 0-2-3    1: 0-1-3    2: 0-4-3    3: 0-1-2-3
@@ -155,6 +165,7 @@ struct FsoRlEnvConfig
     double offeredPktsPerStep{0.0}; //!< Offered application packets per step
     uint32_t packetSize{1024};  //!< Application payload size [bytes]
     uint16_t flowPort{9000};    //!< Destination port identifying the flow
+    bool routeInObs{false};     //!< Append a current-route one-hot to the obs
 };
 
 /**
@@ -295,7 +306,12 @@ FsoRlEnv::Setup(NodeContainer nodes,
     m_sink = sink;
     m_retx = retx;
     m_config = config;
-    m_obs.assign(m_links->size() * 4, 0.0);
+    m_obs.assign(m_links->size() * 4 + (m_config.routeInObs ? m_routes.size() : 0), 0.0);
+    if (m_config.routeInObs)
+    {
+        // Before the first step the one-hot marks the initial route
+        m_obs[m_links->size() * 4 + m_currentRoute] = 1.0;
+    }
 }
 
 void
@@ -314,7 +330,7 @@ FsoRlEnv::GetActionSpace()
 Ptr<OpenGymSpace>
 FsoRlEnv::GetObservationSpace()
 {
-    std::vector<uint32_t> shape = {static_cast<uint32_t>(m_links->size() * 4)};
+    std::vector<uint32_t> shape = {static_cast<uint32_t>(m_obs.size())};
     return CreateObject<OpenGymBoxSpace>(-1e6, 1e6, shape, TypeNameGet<double>());
 }
 
@@ -398,6 +414,17 @@ FsoRlEnv::CollectStepMetrics()
         m_obs[4 * i + 1] = linkPer;
         m_obs[4 * i + 2] = link.scintIndex;
         m_obs[4 * i + 3] = queued;
+    }
+
+    if (m_config.routeInObs)
+    {
+        // One-hot of the route held while this step's state was measured;
+        // ExecuteActions runs after Notify, so this is the pre-decision route
+        std::size_t base = m_links->size() * 4;
+        for (std::size_t r = 0; r < m_routes.size(); r++)
+        {
+            m_obs[base + r] = (r == m_currentRoute) ? 1.0 : 0.0;
+        }
     }
 
     uint64_t flowTx = 0;
@@ -609,6 +636,7 @@ main(int argc, char* argv[])
     double flapPenalty = 5.0;
     double energyWeight = 0.01;
     double goodputWeight = 1.0;
+    bool routeInObs = false;
     uint32_t simSeed = 1;
 
     CommandLine cmd(__FILE__);
@@ -641,6 +669,9 @@ main(int argc, char* argv[])
     cmd.AddValue("flapPenalty", "Reward penalty for switching routes", flapPenalty);
     cmd.AddValue("energyWeight", "Reward weight per packet-hop sent", energyWeight);
     cmd.AddValue("goodputWeight", "Reward weight per undelivered packet (tcp)", goodputWeight);
+    cmd.AddValue("routeInObs",
+                 "Append a one-hot of the current route to the observation",
+                 routeInObs);
     cmd.AddValue("simSeed", "Run number for the RNG", simSeed);
     cmd.Parse(argc, argv);
 
@@ -861,6 +892,7 @@ main(int argc, char* argv[])
         DataRate(trafficRate).GetBitRate() * stepTime / (8.0 * packetSize);
     config.packetSize = packetSize;
     config.flowPort = port;
+    config.routeInObs = routeInObs;
 
     Ptr<FsoRlEnv> env = CreateObject<FsoRlEnv>();
     env->Setup(nodes,
