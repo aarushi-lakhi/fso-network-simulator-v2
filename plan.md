@@ -326,9 +326,9 @@ Thumbs.db
 | 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | ✅ Complete | Merged via PR #6 (2026-07-03); random-action episodes verified over shared memory |
 | 4b — PPO Agent | `feat/ppo-routing-agent` | ✅ Complete | Merged via PR #7 (2026-07-03); 28 tests, 97% coverage. Integration merged via PR #8: PPO beats random by ~41% on the live mesh (PDR 0.724 vs 0.670, C²ₙ=10⁻¹³) |
 | 5 — Benchmarks | `feat/benchmark-suite` | ✅ Complete | Merged via PR #10 (2026-07-03). PPO converges to the optimal (best-static) policy; beats random by 41%, AODV by 15%. Full findings in `benchmarks/results/README.md` |
-| 6a — Correlated sampler (math) | `math/correlated-fading-sampler` | 🔄 In progress | Gaussian-copula AR(1) per Gamma component; exact Gamma-Gamma marginal, tunable coherence time; validated in `prototype/` |
-| 6b — ns-3 correlated fading | `feat/correlated-fso-fading` | 🔄 In progress | Mirrors 6a in the fso-channel module (boost::math gamma quantile); τ=0 ⇒ i.i.d. (backward compatible) |
-| 6c — Correlated-fading study | `feat/correlated-fading-study` | 🔲 Not started | Depends on 6a+6b: retrain + rerun benchmarks over a coherence-time sweep; can RL now beat best-static? |
+| 6a — Correlated sampler (math) | `math/correlated-fading-sampler` | ✅ Complete | Merged via PR #16 (2026-07-07); SI identity holds on correlated chains within 1% |
+| 6b — ns-3 correlated fading | `feat/correlated-fso-fading` | ✅ Complete | Merged via PR #17 (2026-07-07); τ=0 bit-identical to i.i.d., 9/9 tests |
+| 6c — Correlated-fading study | `feat/correlated-fading-study` | ✅ Complete | Answer: no — memory is necessary but not sufficient. PPO stays constant-route even at τ=500 ms / 50 ms steps; PER observation fixed route *selection*, not switching. Analysis in `benchmarks/results/README.md` |
 
 **Status legend:** 🔲 Not started · 🔄 In progress · ✅ Complete · ⏸ Blocked
 
