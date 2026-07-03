@@ -141,7 +141,10 @@ git rebase origin/dev        # preferred over merge — keeps history linear
 # 4. When ready: push, open PR → dev, get review (even self-review — read the diff!)
 git push origin feat/gamma-gamma-sampler
 # PR title should match branch: "feat: gamma-gamma sampler"
-# Merge strategy: squash-merge (clean history on dev) or rebase-merge (preserve commits)
+# Merge strategy: merge commit or rebase-merge — NO squash merges (keep the real commits)
+# Keep PRs and commits small and intentional; stack branches off other feature
+# branches when needed to keep each PR reviewable
+# PR descriptions: a few straightforward notes, casual tone — no headers/bolding/text walls
 # NEVER merge directly — always open a PR so there's a review record
 
 # 5. After merge, delete the remote branch (GitHub does this automatically if configured)

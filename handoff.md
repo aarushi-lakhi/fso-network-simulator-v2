@@ -111,7 +111,8 @@ python turbulence_plots.py
    physically sensible (heavy-tailed strong-turbulence fades, fading-induced BER slope
    flattening, SI saturation near ~1.2).
 
-4. **Open PR: `feat/gamma-gamma-sampler` → `dev`** — user reviews the diff, squash-merge.
+4. **Open PR: `feat/gamma-gamma-sampler` → `dev`** — ✅ opened 2026-07-03 (PR #1);
+   user reviews the diff and merges (no squash — see working style below).
 
 5. **Start Phase 1 (`chore/dev-environment`)** — macOS setup: GNU Radio 3.10 (Homebrew or
    conda) + ns-3.40 (builds natively with CMake/clang). Verify ns3-ai's shared-memory
@@ -137,6 +138,20 @@ python turbulence_plots.py
 - **Commit message style:** Conventional Commits — `<type>(<scope>): <description>`.
   **Do NOT add `Co-Authored-By` trailers** (policy changed 2026-07-03; earlier commits
   carry the trailer, new ones must not).
+
+- **No squash merges** (policy 2026-07-03). Merge PRs with a merge commit or rebase-merge
+  so the real commits are preserved.
+
+- **Small, intentional commits and PRs.** No huge PRs or huge commits with lots of
+  changes. Stacked branches (branching off another feature branch) are fine — preferred,
+  even — if that's what it takes to keep each PR small. (PR #1 was grandfathered in.)
+
+- **PR descriptions:** a few straightforward, casual notes plus any important details.
+  No headers, bolding, or large chunks of text.
+
+- **Code comments:** sparse and purposeful — no heavy AI-generated-looking commenting.
+  Docstrings on public functions stay (per plan.md Python standards); inline comments
+  only where something non-obvious needs explaining.
 
 - **Two agents in parallel:** Safe when working in different directories. The plan defines
   which branches touch which directories — check before running concurrent agents.
