@@ -27,6 +27,10 @@ and ns3-ai's bindings want ≤ 3.11. ns3-ai's Python packages live in `~/fso-too
 - On ns-3.40 the bundled `multi-bss` example doesn't compile (needs ns-3.41's
   `MakeEnumAccessor<T>`); `install_ns3_ai.sh` comments it out
   ([ns3-ai#112](https://github.com/hust-diangroup/ns3-ai/issues/112)).
-- Caveat: no independent Apple Silicon reports exist — only the maintainer's own macOS
-  testing. If shared memory misbehaves here, the proven fallback is Docker or Lima
-  Ubuntu 22.04 with ns-3 + the agent in the same container (see plan.md decision log).
+- **Verified working on this machine (2026-07-03):** the `a-plus-b` msg-interface example
+  ran end-to-end on Apple Silicon — Python and the ns-3 C++ process exchanged data through
+  boost shared memory correctly. Run Python-side examples with the ns3ai venv *activated*
+  (`source ~/fso-tools/ns3ai-venv/bin/activate`): `ns3ai_utils` spawns `./ns3` via
+  `env python3`, which must resolve to the venv's 3.11, not Homebrew's 3.14.
+- If shared memory ever misbehaves, the proven fallback is Docker or Lima Ubuntu 22.04
+  with ns-3 + the agent in the same container (see plan.md decision log).
