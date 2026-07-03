@@ -11,4 +11,6 @@ build_lib(
     ${libmobility}
     ${libnetwork}
     ${libpoint-to-point}
+  TEST_SOURCES
+    test/fso-channel-test-suite.cc
 )
