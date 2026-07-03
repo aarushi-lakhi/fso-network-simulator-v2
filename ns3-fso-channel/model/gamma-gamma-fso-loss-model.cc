@@ -17,10 +17,13 @@
 
 #include "gamma-gamma-fso-loss-model.h"
 
+#include "ns3/abort.h"
 #include "ns3/boolean.h"
 #include "ns3/double.h"
 #include "ns3/log.h"
 #include "ns3/mobility-model.h"
+
+#include <cmath>
 
 namespace ns3
 {
@@ -78,27 +81,44 @@ double
 GammaGammaFsoLossModel::GetRytovVariance(double distance) const
 {
     NS_ABORT_MSG_IF(distance <= 0.0, "distance must be positive");
-    return 0.0;
+    double k = 2.0 * M_PI / m_wavelength;
+    return 1.23 * m_c2n * std::pow(k, 7.0 / 6.0) * std::pow(distance, 11.0 / 6.0);
 }
 
 std::pair<double, double>
 GammaGammaFsoLossModel::GetAlphaBeta(double distance) const
 {
-    NS_ABORT_MSG_IF(distance <= 0.0, "distance must be positive");
-    return {1.0, 1.0};
+    double sigma2R = GetRytovVariance(distance);
+    double sigmaR = std::sqrt(sigma2R);
+
+    double expArgAlpha = 0.49 * sigma2R / std::pow(1.0 + 1.11 * std::pow(sigmaR, 12.0 / 5.0), 7.0 / 6.0);
+    double expArgBeta = 0.51 * sigma2R / std::pow(1.0 + 0.69 * std::pow(sigmaR, 12.0 / 5.0), 5.0 / 6.0);
+
+    // expm1 keeps alpha/beta finite and accurate as sigma2R -> 0
+    double alpha = 1.0 / std::expm1(expArgAlpha);
+    double beta = 1.0 / std::expm1(expArgBeta);
+
+    return {alpha, beta};
 }
 
 double
 GammaGammaFsoLossModel::GetFadingSample(double distance)
 {
-    NS_ABORT_MSG_IF(distance <= 0.0, "distance must be positive");
-    return 1.0;
+    if (!m_turbulence)
+    {
+        return 1.0;
+    }
+    auto [alpha, beta] = GetAlphaBeta(distance);
+    double largeScale = m_rng->GetValue(alpha, 1.0 / alpha);
+    double smallScale = m_rng->GetValue(beta, 1.0 / beta);
+    return largeScale * smallScale;
 }
 
 double
 GammaGammaFsoLossModel::GetExtinctionLossDb(double distance) const
 {
-    return 0.0;
+    // -10 log10(exp(-sigma_ext * d)) = 10 sigma_ext d / ln(10)
+    return 10.0 * m_extinction * distance / std::log(10.0);
 }
 
 double
@@ -106,7 +126,20 @@ GammaGammaFsoLossModel::DoCalcRxPower(double txPowerDbm,
                                       Ptr<MobilityModel> a,
                                       Ptr<MobilityModel> b) const
 {
-    return txPowerDbm;
+    double distance = a->GetDistanceFrom(b);
+    if (distance <= 0.0)
+    {
+        return txPowerDbm;
+    }
+
+    double rxPowerDbm = txPowerDbm - GetExtinctionLossDb(distance);
+    // GetFadingSample() only mutates the RNG stream; propagation models are
+    // conceptually const per ns-3 convention (cf. RandomPropagationLossModel)
+    double irradiance = const_cast<GammaGammaFsoLossModel*>(this)->GetFadingSample(distance);
+    rxPowerDbm += 10.0 * std::log10(irradiance);
+
+    NS_LOG_DEBUG("d=" << distance << " m, I=" << irradiance << ", rx=" << rxPowerDbm << " dBm");
+    return rxPowerDbm;
 }
 
 int64_t
