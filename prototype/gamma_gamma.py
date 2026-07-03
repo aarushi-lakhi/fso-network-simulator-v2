@@ -93,10 +93,11 @@ class TurbulenceParams:
         """Compute the Rytov variance for this link.
 
         Returns:
-            σ²_R — the Rytov variance (dimensionless). Values:
-                σ²_R < 0.3 → weak turbulence
-                0.3 ≤ σ²_R ≤ 5 → moderate turbulence
-                σ²_R > 5 → strong turbulence
+            σ²_R — the Rytov variance (dimensionless). Regimes
+            (Andrews & Phillips, 2005):
+                σ²_R < 0.3 → weak fluctuations
+                0.3 ≤ σ²_R ≤ 1 → moderate fluctuations
+                σ²_R > 1 → strong fluctuations (saturation as σ²_R → ∞)
         """
         return rytov_variance(self.C2n, self.wavelength, self.distance)
 
