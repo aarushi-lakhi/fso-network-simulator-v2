@@ -1,7 +1,7 @@
 # FSO Network Simulator — Project Plan
 
 > **Living document.** Update this file as phases complete, decisions change, or scope shifts.
-> Last updated: 2026-05-26
+> Last updated: 2026-07-03
 
 ---
 
@@ -109,7 +109,7 @@ Branch names describe *what the code does*, not when you're doing it (no phase n
 ```
 main
 └── dev
-    ├── chore/dev-environment          # Phase 1: WSL2, GNU Radio, ns-3 install scripts + verification
+    ├── chore/dev-environment          # Phase 1: macOS GNU Radio + ns-3 install scripts + verification
     ├── feat/gamma-gamma-sampler       # Phase 2a: Python prototype — Gamma-Gamma RNG, BER curves
     ├── feat/gr-fso-fading-block       # Phase 2b: GNU Radio OOT module (depends on gamma-gamma-sampler)
     ├── feat/ns3-fso-propagation-model # Phase 3: custom PropagationLossModel in C++
@@ -141,7 +141,10 @@ git rebase origin/dev        # preferred over merge — keeps history linear
 # 4. When ready: push, open PR → dev, get review (even self-review — read the diff!)
 git push origin feat/gamma-gamma-sampler
 # PR title should match branch: "feat: gamma-gamma sampler"
-# Merge strategy: squash-merge (clean history on dev) or rebase-merge (preserve commits)
+# Merge strategy: merge commit or rebase-merge — NO squash merges (keep the real commits)
+# Keep PRs and commits small and intentional; stack branches off other feature
+# branches when needed to keep each PR reviewable
+# PR descriptions: a few straightforward notes, casual tone — no headers/bolding/text walls
 # NEVER merge directly — always open a PR so there's a review record
 
 # 5. After merge, delete the remote branch (GitHub does this automatically if configured)
@@ -311,8 +314,8 @@ Thumbs.db
 
 | Phase | Branch | Status | Notes |
 |-------|--------|--------|-------|
-| 1 — Environment Setup | `chore/dev-environment` | 🔲 Not started | WSL2 + Ubuntu 22.04 + GNU Radio 3.10 + ns-3.40 |
-| 2a — Python Prototype | `feat/gamma-gamma-sampler` | 🔲 Not started | **Start here** — no WSL2 needed, pure Python |
+| 1 — Environment Setup | `chore/dev-environment` | 🔲 Not started | macOS: GNU Radio 3.10 (Homebrew/conda) + ns-3.40 (native CMake/clang); verify ns3-ai shared memory works on macOS early |
+| 2a — Python Prototype | `feat/gamma-gamma-sampler` | 🔄 In progress | Code + 39 tests + plots done, verified on macOS (2026-07-03); PR → `dev` pending |
 | 2b — GNU Radio Block | `feat/gr-fso-fading-block` | 🔲 Not started | Depends on Phase 1 + 2a |
 | 3 — ns-3 FSO Channel | `feat/ns3-fso-propagation-model` | 🔲 Not started | Depends on Phase 1 + 2a (for params) |
 | 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | 🔲 Not started | Depends on Phase 3 |
@@ -332,6 +335,8 @@ Thumbs.db
 | 2026-05-26 | Omit `gr-osmosdr` from install | SDR hardware package — irrelevant without physical hardware |
 | 2026-05-26 | Target GNU Radio 3.10 on Ubuntu 22.04 | Avoid version fragmentation; 3.10 ships with Ubuntu 22.04 apt |
 | 2026-05-26 | FSO topology uses PointToPoint, not Wi-Fi mesh | FSO is point-to-point laser, not broadcast RF — wrong propagation abstraction |
+| 2026-07-03 | Dev environment moved from Windows 11 + WSL2 to macOS (Apple Silicon) | New laptop is a Mac. GNU Radio 3.10 installs via Homebrew/conda; ns-3.40 builds natively with CMake + clang. Supersedes the Ubuntu 22.04/WSL2 parts of the 2026-05-26 decision (GNU Radio 3.10 target unchanged). Risk: ns3-ai shared memory is Linux-first — verify on macOS in Phase 1; fallback is Docker/Lima Ubuntu 22.04 |
+| 2026-07-03 | No `Co-Authored-By` trailers on commits | User preference; supersedes earlier co-author policy in handoff.md |
 
 ---
 
