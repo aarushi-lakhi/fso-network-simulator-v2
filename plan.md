@@ -314,7 +314,7 @@ Thumbs.db
 
 | Phase | Branch | Status | Notes |
 |-------|--------|--------|-------|
-| 1 — Environment Setup | `chore/dev-environment` | 🔄 In progress | macOS: GNU Radio 3.10 (Homebrew) + ns-3.40 (native CMake/clang); verify ns3-ai shared memory works on macOS early |
+| 1 — Environment Setup | `chore/dev-environment` | ✅ Complete | Installed + verified on macOS 2026-07-03 (`setup/verify_env.sh` 11/11); ns3-ai shared memory confirmed working natively on Apple Silicon |
 | 2a — Python Prototype | `feat/gamma-gamma-sampler` | ✅ Complete | Merged to `dev` via PR #1 (2026-07-03); 39 tests, 99% coverage |
 | 2b — GNU Radio Block | `feat/gr-fso-fading-block` | 🔲 Not started | Depends on Phase 1 + 2a |
 | 3 — ns-3 FSO Channel | `feat/ns3-fso-propagation-model` | 🔲 Not started | Depends on Phase 1 + 2a (for params) |
@@ -337,6 +337,7 @@ Thumbs.db
 | 2026-05-26 | FSO topology uses PointToPoint, not Wi-Fi mesh | FSO is point-to-point laser, not broadcast RF — wrong propagation abstraction |
 | 2026-07-03 | Dev environment moved from Windows 11 + WSL2 to macOS (Apple Silicon) | New laptop is a Mac. GNU Radio 3.10 installs via Homebrew/conda; ns-3.40 builds natively with CMake + clang. Supersedes the Ubuntu 22.04/WSL2 parts of the 2026-05-26 decision (GNU Radio 3.10 target unchanged). Risk: ns3-ai shared memory is Linux-first — verify on macOS in Phase 1; fallback is Docker/Lima Ubuntu 22.04 |
 | 2026-07-03 | No `Co-Authored-By` trailers on commits | User preference; supersedes earlier co-author policy in handoff.md |
+| 2026-07-03 | ns3-ai natively on macOS — Docker/Lima fallback not needed | a-plus-b shared-memory example verified end-to-end on Apple Silicon. ns-3 toolchain pinned to python@3.11 (ns-3.40's `./ns3` breaks on 3.14; ns3-ai bindings want ≤3.11); ns-3.40 needs a small libc++ compat patch, shipped in `setup/patches/` |
 
 ---
 
