@@ -1,0 +1,39 @@
+# FSO RL environment configuration. Flat keys; read by the Python side
+# (check_env.py, agent/) and mapped onto fso-rl-env command-line arguments.
+
+# topology
+num_nodes: 5
+num_links: 7
+mesh_radius_m: 800.0
+data_rate: 100Mbps
+channel_delay_us: 5
+
+# link budget
+tx_power_dbm: 10.0
+noise_dbm: -8.0
+wavelength_m: 1550e-9
+extinction_coeff_per_m: 1e-5
+packet_size_bytes: 1024
+
+# turbulence (C2n in m^-2/3); c2n is the active value
+c2n: 1e-15
+c2n_weak: 1e-17
+c2n_moderate: 1e-15
+c2n_strong: 1e-13
+
+# episode
+episode_steps: 100
+step_time_s: 0.1
+update_interval_ms: 1.0
+
+# traffic
+traffic_rate: 2Mbps
+
+# reward weights
+reward_drop_weight: 1.0
+reward_delay_weight: 0.1
+reward_flap_penalty: 5.0
+reward_energy_weight: 0.01
+
+# rng
+sim_seed: 1
