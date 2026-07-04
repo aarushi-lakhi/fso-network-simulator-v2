@@ -9,6 +9,7 @@ self-contained toy routing env is used.
 
 Typical usage:
     $ python train.py --total-steps 50000 --seed 42
+    $ python train.py --env ns3 --c2n 1e-13 --seed 42      # real FSO env
     $ python train.py --config ../config/train_config.yaml
     $ tensorboard --logdir runs/
 
@@ -58,6 +59,13 @@ class TrainConfig:
         checkpoint_path: Where to save the final checkpoint. None disables.
         checkpoint_every: Save a checkpoint every N updates (0 = final only).
         device: Torch device string.
+        env: Environment backend: "toy" (hermetic, default) or "ns3"
+            (real FSO mesh via ns3-ai; needs the built ns-3 tree).
+        sim_config: Path to sim_config.yaml for the ns3 env. None uses
+            the repo default (ns3-rl-router/config/sim_config.yaml).
+        c2n: C2n override for the ns3 env [m^-2/3], e.g. "1e-13".
+        rewards_csv: Where to write per-episode rewards as CSV. None
+            disables.
     """
 
     total_steps: int = 50_000
@@ -77,6 +85,10 @@ class TrainConfig:
     checkpoint_path: str | None = None
     checkpoint_every: int = 0
     device: str = "cpu"
+    env: str = "toy"
+    sim_config: str | None = None
+    c2n: str | None = None
+    rewards_csv: str | None = None
 
     def ppo_config(self) -> PPOConfig:
         """Build the PPOConfig subset of this training config."""
@@ -251,6 +263,14 @@ def parse_args(argv: list[str] | None = None) -> TrainConfig:
     parser.add_argument("--log-dir", type=str, default=None)
     parser.add_argument("--checkpoint-path", type=str, default=None)
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--env", type=str, default=None, choices=("toy", "ns3"),
+                        help="environment backend (default: toy)")
+    parser.add_argument("--sim-config", type=str, default=None,
+                        help="sim_config.yaml path for --env ns3")
+    parser.add_argument("--c2n", type=str, default=None,
+                        help="C2n override for --env ns3, e.g. 1e-13")
+    parser.add_argument("--rewards-csv", type=str, default=None,
+                        help="write per-episode rewards to this CSV file")
     args = parser.parse_args(argv)
 
     config = load_config(args.config) if args.config else TrainConfig()
@@ -264,6 +284,10 @@ def parse_args(argv: list[str] | None = None) -> TrainConfig:
         "log_dir",
         "checkpoint_path",
         "device",
+        "env",
+        "sim_config",
+        "c2n",
+        "rewards_csv",
     ):
         value = getattr(args, name)
         if value is not None:
@@ -271,11 +295,43 @@ def parse_args(argv: list[str] | None = None) -> TrainConfig:
     return config
 
 
+def resolve_env_factory(config: TrainConfig) -> EnvFactory:
+    """Build the env factory selected by config.env.
+
+    The ns3 backend chdirs the process into the ns-3 root on creation,
+    so all output paths on the config are made absolute here first.
+
+    Args:
+        config: Training config; log/checkpoint/CSV paths are resolved
+            in place when the ns3 backend is selected.
+
+    Returns:
+        Zero-argument factory producing the training environment.
+    """
+    if config.env == "toy":
+        return ToyFsoRoutingEnv
+    if config.env != "ns3":
+        raise ValueError(f"unknown env backend: {config.env!r}")
+
+    from ns3_env import DEFAULT_CONFIG_PATH, make_ns3_env
+
+    for name in ("log_dir", "checkpoint_path", "rewards_csv"):
+        value = getattr(config, name)
+        if value is not None:
+            setattr(config, name, str(Path(value).resolve()))
+    sim_config = str(Path(config.sim_config or DEFAULT_CONFIG_PATH).resolve())
+    return lambda: make_ns3_env(sim_config, c2n=config.c2n, seed=config.seed)
+
+
 def main() -> None:
-    """CLI entry point: train on the toy env and print a reward summary."""
+    """CLI entry point: train on the selected env and print a reward summary."""
     config = parse_args()
-    result = train(config)
+    result = train(config, env_factory=resolve_env_factory(config))
     rewards = result.episode_rewards
+    if config.rewards_csv is not None and rewards:
+        path = Path(config.rewards_csv)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savetxt(path, np.asarray(rewards), header="episode_reward")
     if rewards:
         head = np.mean(rewards[: max(1, len(rewards) // 10)])
         tail = np.mean(rewards[-max(1, len(rewards) // 10):])
