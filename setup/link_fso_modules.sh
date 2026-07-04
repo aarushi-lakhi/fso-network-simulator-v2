@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Phase 4a: link this repo's ns-3 pieces into the ns-3 tree and build them.
-# Symlinks ns3-fso-channel -> contrib/fso-channel and ns3-rl-router/sim ->
-# scratch/fso-rl-env, then reconfigures and builds. Idempotent; pass
-# --unlink to remove the symlinks and restore the default tree (ai only).
+# Phases 4a/5: link this repo's ns-3 pieces into the ns-3 tree and build them.
+# Symlinks ns3-fso-channel -> contrib/fso-channel, ns3-rl-router/sim ->
+# scratch/fso-rl-env, and benchmarks/aodv -> scratch/fso-aodv-baseline, then
+# reconfigures and builds. Idempotent; pass --unlink to remove the symlinks
+# and restore the default tree (ai only).
 set -euo pipefail
 
 FSO_TOOLS_DIR="${FSO_TOOLS_DIR:-$HOME/fso-tools}"
@@ -20,7 +21,8 @@ reconfigure() {
 }
 
 if [ "${1:-}" = "--unlink" ]; then
-    rm -f "$NS3_DIR/contrib/fso-channel" "$NS3_DIR/scratch/fso-rl-env"
+    rm -f "$NS3_DIR/contrib/fso-channel" "$NS3_DIR/scratch/fso-rl-env" \
+        "$NS3_DIR/scratch/fso-aodv-baseline"
     reconfigure
     # Build the ai module like install_ns3_ai.sh does; a full './ns3 build'
     # would trip over ns3-ai's bundled rate-control example, which needs a
@@ -32,10 +34,11 @@ fi
 
 ln -sfn "$REPO_DIR/ns3-fso-channel" "$NS3_DIR/contrib/fso-channel"
 ln -sfn "$REPO_DIR/ns3-rl-router/sim" "$NS3_DIR/scratch/fso-rl-env"
+ln -sfn "$REPO_DIR/benchmarks/aodv" "$NS3_DIR/scratch/fso-aodv-baseline"
 
 reconfigure
-"$NS3_PYTHON" ./ns3 build fso-channel fso-rl-env
+"$NS3_PYTHON" ./ns3 build fso-channel fso-rl-env fso-aodv-baseline
 
-echo "OK: fso-channel and fso-rl-env linked and built"
+echo "OK: fso-channel, fso-rl-env, and fso-aodv-baseline linked and built"
 echo "Smoke test: source $FSO_TOOLS_DIR/ns3ai-venv/bin/activate &&"
 echo "            python $REPO_DIR/ns3-rl-router/sim/check_env.py --steps 10"
