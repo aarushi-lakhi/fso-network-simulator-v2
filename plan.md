@@ -318,9 +318,9 @@ Thumbs.db
 | 2a — Python Prototype | `feat/gamma-gamma-sampler` | ✅ Complete | Merged to `dev` via PR #1 (2026-07-03); 39 tests, 99% coverage |
 | 2b — GNU Radio Block | `feat/gr-fso-fading-block` | ✅ Complete | Merged to `dev` via PR #3 (2026-07-03); 6 QA tests green |
 | 3 — ns-3 FSO Channel | `feat/ns3-fso-propagation-model` | ✅ Complete | Merged to `dev` via PR #4 (2026-07-03); test suite green, 5-node mesh demo works |
-| 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | 🔄 In progress | Started 2026-07-03; Gym env over the Phase 3 FSO mesh |
-| 4b — PPO Agent | `feat/ppo-routing-agent` | 🔄 In progress | Started 2026-07-03 in parallel with 4a; integration branch follows both |
-| 5 — Benchmarks | `feat/benchmark-suite` | 🔲 Not started | Depends on Phase 4 |
+| 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | ✅ Complete | Merged via PR #6 (2026-07-03); random-action episodes verified over shared memory |
+| 4b — PPO Agent | `feat/ppo-routing-agent` | ✅ Complete | Merged via PR #7 (2026-07-03); 28 tests, 97% coverage. Integration merged via PR #8: PPO beats random by ~41% on the live mesh (PDR 0.724 vs 0.670, C²ₙ=10⁻¹³) |
+| 5 — Benchmarks | `feat/benchmark-suite` | 🔄 In progress | Started 2026-07-03; PPO vs best-static / random / AODV across C²ₙ sweep |
 
 **Status legend:** 🔲 Not started · 🔄 In progress · ✅ Complete · ⏸ Blocked
 
@@ -338,6 +338,7 @@ Thumbs.db
 | 2026-07-03 | Dev environment moved from Windows 11 + WSL2 to macOS (Apple Silicon) | New laptop is a Mac. GNU Radio 3.10 installs via Homebrew/conda; ns-3.40 builds natively with CMake + clang. Supersedes the Ubuntu 22.04/WSL2 parts of the 2026-05-26 decision (GNU Radio 3.10 target unchanged). Risk: ns3-ai shared memory is Linux-first — verify on macOS in Phase 1; fallback is Docker/Lima Ubuntu 22.04 |
 | 2026-07-03 | No `Co-Authored-By` trailers on commits | User preference; supersedes earlier co-author policy in handoff.md |
 | 2026-07-03 | ns3-ai natively on macOS — Docker/Lima fallback not needed | a-plus-b shared-memory example verified end-to-end on Apple Silicon. ns-3 toolchain pinned to python@3.11 (ns-3.40's `./ns3` breaks on 3.14; ns3-ai bindings want ≤3.11); ns-3.40 needs a small libc++ compat patch, shipped in `setup/patches/` |
+| 2026-07-03 | Phase 5 baselines: best-static route, random routing, and AODV — not HWMP | HWMP is 802.11s-specific and the topology is PointToPoint (per the 2026-05-26 decision), so it can't apply. AODV runs at the IP layer and works over p2p links; together with best-fixed-route and random, it gives classical-reactive, oracle-ish, and floor baselines for the trained PPO policy |
 
 ---
 
