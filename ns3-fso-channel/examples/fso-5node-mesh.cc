@@ -24,6 +24,9 @@
 //   ns3 run 'fso-5node-mesh --regime=weak'      (C2n = 1e-17)
 //   ns3 run 'fso-5node-mesh --regime=moderate'  (C2n = 1e-15)
 //   ns3 run 'fso-5node-mesh --regime=strong'    (C2n = 1e-13)
+//
+// Temporally correlated fading (default 0 = i.i.d. block fading):
+//   ns3 run 'fso-5node-mesh --coherenceLarge=100ms --coherenceSmall=10ms'
 
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
@@ -46,10 +49,18 @@ main(int argc, char* argv[])
 {
     std::string regime = "moderate";
     double duration = 10.0;
+    Time coherenceLarge = Seconds(0);
+    Time coherenceSmall = Seconds(0);
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("regime", "Turbulence regime: weak | moderate | strong", regime);
     cmd.AddValue("duration", "Simulation duration [s]", duration);
+    cmd.AddValue("coherenceLarge",
+                 "Large-scale fading coherence time, e.g. 100ms (0 = i.i.d.)",
+                 coherenceLarge);
+    cmd.AddValue("coherenceSmall",
+                 "Small-scale fading coherence time, e.g. 10ms (0 = i.i.d.)",
+                 coherenceSmall);
     cmd.Parse(argc, argv);
 
     double c2n;
@@ -93,6 +104,8 @@ main(int argc, char* argv[])
     fso.SetLossModelAttribute("C2n", DoubleValue(c2n));
     fso.SetLossModelAttribute("Wavelength", DoubleValue(1550e-9));
     fso.SetLossModelAttribute("ExtinctionCoefficient", DoubleValue(1e-5));
+    fso.SetLossModelAttribute("CoherenceTimeLargeScale", TimeValue(coherenceLarge));
+    fso.SetLossModelAttribute("CoherenceTimeSmallScale", TimeValue(coherenceSmall));
     fso.SetLinkAttribute("TxPowerDbm", DoubleValue(10.0));
     fso.SetLinkAttribute("NoiseDbm", DoubleValue(-8.0));
     fso.SetLinkAttribute("UpdateInterval", TimeValue(MilliSeconds(1)));
@@ -149,7 +162,8 @@ main(int argc, char* argv[])
 
     auto classifier = DynamicCast<Ipv4FlowClassifier>(flowMonitorHelper.GetClassifier());
     std::cout << "FSO 5-node mesh, regime=" << regime << " (C2n=" << c2n << " m^-2/3), "
-              << duration << " s of traffic" << std::endl;
+              << duration << " s of traffic, coherence large/small = "
+              << coherenceLarge.As(Time::MS) << "/" << coherenceSmall.As(Time::MS) << std::endl;
     std::cout << std::left << std::setw(24) << "flow" << std::setw(10) << "txPkts"
               << std::setw(10) << "rxPkts" << "PDR" << std::endl;
 
