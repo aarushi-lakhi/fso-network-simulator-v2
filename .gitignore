@@ -43,10 +43,12 @@ ns3-rl-router/agent/runs/
 results/*.csv
 results/*.dat
 
-# ── Benchmarks (Phase 5): commit small result CSVs + plots, not checkpoints ───
+# ── Benchmarks (Phases 5/6): commit small result CSVs + plots, not checkpoints
 benchmarks/results/checkpoints/
 !benchmarks/results/raw_results.csv
 !benchmarks/results/summary.csv
+!benchmarks/results/correlated_raw.csv
+!benchmarks/results/correlated_summary.csv
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store

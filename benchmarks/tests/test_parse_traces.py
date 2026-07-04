@@ -111,6 +111,25 @@ def test_write_summary_roundtrip(raw_csv: Path, tmp_path: Path) -> None:
     assert int(ppo_strong["n_episodes"]) == 2
 
 
+def test_correlated_study_labels_sort_after_regimes(tmp_path: Path) -> None:
+    """Coherence config names (Phase 6) order iid < tau100-20 < tau500-100."""
+    path = tmp_path / "correlated_raw.csv"
+    rows = [
+        "tau500-100,1e-13,ppo,0,100,-500.0,450,2440,2000,0.820,0.20",
+        "tau500-100,1e-13,static-2,0,100,-700.0,650,2440,1800,0.738,0.20",
+        "iid,1e-13,ppo,0,100,-730.0,675,2440,1770,0.725,0.18",
+        "tau100-20,1e-13,ppo,0,100,-650.0,600,2440,1850,0.758,0.19",
+    ]
+    path.write_text("\n".join([CSV_HEADER, *rows]) + "\n")
+    summary = summarize(load_raw(path))
+    labels = [e["regime"] for e in summary]
+    assert labels.index("iid") < labels.index("tau100-20")
+    assert labels.index("tau100-20") < labels.index("tau500-100")
+    best = next(e for e in summary
+                if e["regime"] == "tau500-100" and e["policy"] == "best-static")
+    assert best["detail"] == "route=2"
+
+
 def test_single_episode_std_is_zero(tmp_path: Path) -> None:
     path = tmp_path / "raw.csv"
     path.write_text(CSV_HEADER + "\n" +

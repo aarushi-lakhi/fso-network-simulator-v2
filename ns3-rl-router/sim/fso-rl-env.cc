@@ -27,8 +27,14 @@
 //
 // Observation (Box, double, shape [numLinks * 4] = [28]), for link i:
 //   [4i+0] snrMarginDb  mean SNR margin, TxPowerDbm - extinctionDb(d) - NoiseDbm
-//   [4i+1] dropRate     PhyRxDrop / (PhyRxDrop + PhyRxEnd) over the last step,
-//                       both directions combined (1.0 if nothing was received)
+//   [4i+1] linkPer      current packet error rate of the link (mean of the
+//                       two directions' RateErrorModel rates, i.e. the fading
+//                       bridge's latest channel state). Unlike an empirical
+//                       drop rate this is defined for links carrying no
+//                       traffic, so the agent can see off-route link quality
+//                       (physically: FSO transceivers track beacon power per
+//                       link continuously). Under correlated fading (positive
+//                       coherence times) it predicts the link's near future.
 //   [4i+2] scintIndex   1/alpha + 1/beta + 1/(alpha*beta) at (C2n, d)
 //   [4i+3] queuePkts    packets queued in the two device TX queues
 //
@@ -73,6 +79,8 @@ struct FsoLinkRecord
     uint32_t nodeB;                     //!< Second endpoint node id
     Ptr<PointToPointNetDevice> devA;    //!< Device on nodeA
     Ptr<PointToPointNetDevice> devB;    //!< Device on nodeB
+    Ptr<RateErrorModel> errA;           //!< Error model on devA (B->A PER)
+    Ptr<RateErrorModel> errB;           //!< Error model on devB (A->B PER)
     Ipv4Address addrA;                  //!< nodeA's address on this link
     Ipv4Address addrB;                  //!< nodeB's address on this link
     uint32_t ifA;                       //!< nodeA's interface index
@@ -288,18 +296,21 @@ FsoRlEnv::CollectStepMetrics()
     for (std::size_t i = 0; i < m_links->size(); i++)
     {
         FsoLinkRecord& link = (*m_links)[i];
-        uint64_t ok = link.rxOk - link.prevRxOk;
         uint64_t drop = link.rxDrop - link.prevRxDrop;
         link.prevRxOk = link.rxOk;
         link.prevRxDrop = link.rxDrop;
         dropDelta += drop;
 
-        double dropRate = (ok + drop) > 0 ? double(drop) / double(ok + drop) : 1.0;
+        DoubleValue perBtoA;
+        DoubleValue perAtoB;
+        link.errA->GetAttribute("ErrorRate", perBtoA);
+        link.errB->GetAttribute("ErrorRate", perAtoB);
+        double linkPer = 0.5 * (perBtoA.Get() + perAtoB.Get());
         uint32_t queued =
             link.devA->GetQueue()->GetNPackets() + link.devB->GetQueue()->GetNPackets();
 
         m_obs[4 * i + 0] = link.snrMarginDb;
-        m_obs[4 * i + 1] = dropRate;
+        m_obs[4 * i + 1] = linkPer;
         m_obs[4 * i + 2] = link.scintIndex;
         m_obs[4 * i + 3] = queued;
     }
@@ -410,6 +421,8 @@ main(int argc, char* argv[])
     uint32_t episodeSteps = 100;
     double stepTime = 0.1;
     double updateIntervalMs = 1.0;
+    Time coherenceLarge = Seconds(0);
+    Time coherenceSmall = Seconds(0);
     double txPowerDbm = 10.0;
     double noiseDbm = -8.0;
     double wavelength = 1550e-9;
@@ -429,6 +442,12 @@ main(int argc, char* argv[])
     cmd.AddValue("episodeSteps", "Decision steps per episode", episodeSteps);
     cmd.AddValue("stepTime", "Agent decision interval [s]", stepTime);
     cmd.AddValue("updateIntervalMs", "Fading refresh period [ms]", updateIntervalMs);
+    cmd.AddValue("coherenceLarge",
+                 "Large-scale fading coherence time, e.g. 100ms (0 = i.i.d.)",
+                 coherenceLarge);
+    cmd.AddValue("coherenceSmall",
+                 "Small-scale fading coherence time, e.g. 10ms (0 = i.i.d.)",
+                 coherenceSmall);
     cmd.AddValue("txPowerDbm", "Transmit optical power [dBm]", txPowerDbm);
     cmd.AddValue("noiseDbm", "Receiver noise-equivalent power [dBm]", noiseDbm);
     cmd.AddValue("wavelength", "Optical wavelength [m]", wavelength);
@@ -476,6 +495,8 @@ main(int argc, char* argv[])
     fso.SetLossModelAttribute("C2n", DoubleValue(c2n));
     fso.SetLossModelAttribute("Wavelength", DoubleValue(wavelength));
     fso.SetLossModelAttribute("ExtinctionCoefficient", DoubleValue(extinction));
+    fso.SetLossModelAttribute("CoherenceTimeLargeScale", TimeValue(coherenceLarge));
+    fso.SetLossModelAttribute("CoherenceTimeSmallScale", TimeValue(coherenceSmall));
     fso.SetLinkAttribute("TxPowerDbm", DoubleValue(txPowerDbm));
     fso.SetLinkAttribute("NoiseDbm", DoubleValue(noiseDbm));
     fso.SetLinkAttribute("UpdateInterval", TimeValue(MilliSeconds(updateIntervalMs)));
@@ -508,6 +529,12 @@ main(int argc, char* argv[])
         link.nodeB = j;
         link.devA = DynamicCast<PointToPointNetDevice>(devices.Get(0));
         link.devB = DynamicCast<PointToPointNetDevice>(devices.Get(1));
+        PointerValue errorModel;
+        link.devA->GetAttribute("ReceiveErrorModel", errorModel);
+        link.errA = errorModel.Get<RateErrorModel>();
+        link.devB->GetAttribute("ReceiveErrorModel", errorModel);
+        link.errB = errorModel.Get<RateErrorModel>();
+        NS_ABORT_MSG_IF(!link.errA || !link.errB, "missing link error model");
         link.addrA = ifaces.GetAddress(0);
         link.addrB = ifaces.GetAddress(1);
         link.ifA = ifaces.Get(0).second;
