@@ -1,0 +1,62 @@
+id: fso_turbulence_fso_fading_channel
+label: FSO Fading Channel
+category: '[FSO Turbulence]'
+
+templates:
+  imports: from gnuradio import fso_turbulence
+  make: |-
+    fso_turbulence.fso_fading_channel(
+        C2n=${C2n},
+        wavelength=${wavelength},
+        distance=${distance},
+        coherence_samples=${coherence_samples},
+        seed=${seed})
+
+parameters:
+- id: C2n
+  label: 'C2n [m^(-2/3)]'
+  dtype: real
+  default: 1e-15
+- id: wavelength
+  label: 'Wavelength [m]'
+  dtype: real
+  default: 1550e-9
+- id: distance
+  label: 'Distance [m]'
+  dtype: real
+  default: 1000.0
+- id: coherence_samples
+  label: Coherence Samples
+  dtype: int
+  default: 1000
+- id: seed
+  label: Seed
+  dtype: raw
+  default: None
+
+inputs:
+- label: in
+  domain: stream
+  dtype: complex
+
+outputs:
+- label: out
+  domain: stream
+  dtype: complex
+
+documentation: |-
+  Gamma-Gamma atmospheric fading channel for Free-Space Optical links.
+
+  Multiplies the complex field amplitude by sqrt(I), where I is Gamma-Gamma
+  distributed irradiance with E[I] = 1, so signal power follows the
+  irradiance statistics (Andrews & Phillips, 2005). Shape parameters alpha
+  and beta are derived from the Rytov variance
+  (sigma^2_R = 1.23 C2n k^(7/6) L^(11/6)) via plane-wave approximations.
+
+  Each fading coefficient is held for 'Coherence Samples' consecutive
+  samples to model the turbulence coherence time (turbulence ~kHz vs.
+  sample rates ~MHz). Set it to sample_rate x coherence_time.
+
+  C2n regimes: 1e-17 (weak), 1e-15 (moderate), 1e-13 (strong).
+
+file_format: 1

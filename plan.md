@@ -1,7 +1,7 @@
 # FSO Network Simulator — Project Plan
 
 > **Living document.** Update this file as phases complete, decisions change, or scope shifts.
-> Last updated: 2026-05-26
+> Last updated: 2026-07-03
 
 ---
 
@@ -109,7 +109,7 @@ Branch names describe *what the code does*, not when you're doing it (no phase n
 ```
 main
 └── dev
-    ├── chore/dev-environment          # Phase 1: WSL2, GNU Radio, ns-3 install scripts + verification
+    ├── chore/dev-environment          # Phase 1: macOS GNU Radio + ns-3 install scripts + verification
     ├── feat/gamma-gamma-sampler       # Phase 2a: Python prototype — Gamma-Gamma RNG, BER curves
     ├── feat/gr-fso-fading-block       # Phase 2b: GNU Radio OOT module (depends on gamma-gamma-sampler)
     ├── feat/ns3-fso-propagation-model # Phase 3: custom PropagationLossModel in C++
@@ -141,7 +141,10 @@ git rebase origin/dev        # preferred over merge — keeps history linear
 # 4. When ready: push, open PR → dev, get review (even self-review — read the diff!)
 git push origin feat/gamma-gamma-sampler
 # PR title should match branch: "feat: gamma-gamma sampler"
-# Merge strategy: squash-merge (clean history on dev) or rebase-merge (preserve commits)
+# Merge strategy: merge commit or rebase-merge — NO squash merges (keep the real commits)
+# Keep PRs and commits small and intentional; stack branches off other feature
+# branches when needed to keep each PR reviewable
+# PR descriptions: a few straightforward notes, casual tone — no headers/bolding/text walls
 # NEVER merge directly — always open a PR so there's a review record
 
 # 5. After merge, delete the remote branch (GitHub does this automatically if configured)
@@ -311,13 +314,13 @@ Thumbs.db
 
 | Phase | Branch | Status | Notes |
 |-------|--------|--------|-------|
-| 1 — Environment Setup | `chore/dev-environment` | 🔲 Not started | WSL2 + Ubuntu 22.04 + GNU Radio 3.10 + ns-3.40 |
-| 2a — Python Prototype | `feat/gamma-gamma-sampler` | 🔲 Not started | **Start here** — no WSL2 needed, pure Python |
-| 2b — GNU Radio Block | `feat/gr-fso-fading-block` | 🔲 Not started | Depends on Phase 1 + 2a |
-| 3 — ns-3 FSO Channel | `feat/ns3-fso-propagation-model` | 🔲 Not started | Depends on Phase 1 + 2a (for params) |
-| 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | 🔲 Not started | Depends on Phase 3 |
-| 4b — PPO Agent | `feat/ppo-routing-agent` | 🔲 Not started | Can prototype in parallel with 4a |
-| 5 — Benchmarks | `feat/benchmark-suite` | 🔲 Not started | Depends on Phase 4 |
+| 1 — Environment Setup | `chore/dev-environment` | ✅ Complete | Installed + verified on macOS 2026-07-03 (`setup/verify_env.sh` 11/11); ns3-ai shared memory confirmed working natively on Apple Silicon |
+| 2a — Python Prototype | `feat/gamma-gamma-sampler` | ✅ Complete | Merged to `dev` via PR #1 (2026-07-03); 39 tests, 99% coverage |
+| 2b — GNU Radio Block | `feat/gr-fso-fading-block` | ✅ Complete | Merged to `dev` via PR #3 (2026-07-03); 6 QA tests green |
+| 3 — ns-3 FSO Channel | `feat/ns3-fso-propagation-model` | ✅ Complete | Merged to `dev` via PR #4 (2026-07-03); test suite green, 5-node mesh demo works |
+| 4a — ns3-ai Interface | `feat/ns3-ai-gym-interface` | ✅ Complete | Merged via PR #6 (2026-07-03); random-action episodes verified over shared memory |
+| 4b — PPO Agent | `feat/ppo-routing-agent` | ✅ Complete | Merged via PR #7 (2026-07-03); 28 tests, 97% coverage. Integration merged via PR #8: PPO beats random by ~41% on the live mesh (PDR 0.724 vs 0.670, C²ₙ=10⁻¹³) |
+| 5 — Benchmarks | `feat/benchmark-suite` | ✅ Complete | Merged via PR #10 (2026-07-03). PPO converges to the optimal (best-static) policy; beats random by 41%, AODV by 15%. Full findings in `benchmarks/results/README.md` |
 
 **Status legend:** 🔲 Not started · 🔄 In progress · ✅ Complete · ⏸ Blocked
 
@@ -332,6 +335,10 @@ Thumbs.db
 | 2026-05-26 | Omit `gr-osmosdr` from install | SDR hardware package — irrelevant without physical hardware |
 | 2026-05-26 | Target GNU Radio 3.10 on Ubuntu 22.04 | Avoid version fragmentation; 3.10 ships with Ubuntu 22.04 apt |
 | 2026-05-26 | FSO topology uses PointToPoint, not Wi-Fi mesh | FSO is point-to-point laser, not broadcast RF — wrong propagation abstraction |
+| 2026-07-03 | Dev environment moved from Windows 11 + WSL2 to macOS (Apple Silicon) | New laptop is a Mac. GNU Radio 3.10 installs via Homebrew/conda; ns-3.40 builds natively with CMake + clang. Supersedes the Ubuntu 22.04/WSL2 parts of the 2026-05-26 decision (GNU Radio 3.10 target unchanged). Risk: ns3-ai shared memory is Linux-first — verify on macOS in Phase 1; fallback is Docker/Lima Ubuntu 22.04 |
+| 2026-07-03 | No `Co-Authored-By` trailers on commits | User preference; supersedes earlier co-author policy in handoff.md |
+| 2026-07-03 | ns3-ai natively on macOS — Docker/Lima fallback not needed | a-plus-b shared-memory example verified end-to-end on Apple Silicon. ns-3 toolchain pinned to python@3.11 (ns-3.40's `./ns3` breaks on 3.14; ns3-ai bindings want ≤3.11); ns-3.40 needs a small libc++ compat patch, shipped in `setup/patches/` |
+| 2026-07-03 | Phase 5 baselines: best-static route, random routing, and AODV — not HWMP | HWMP is 802.11s-specific and the topology is PointToPoint (per the 2026-05-26 decision), so it can't apply. AODV runs at the IP layer and works over p2p links; together with best-fixed-route and random, it gives classical-reactive, oracle-ish, and floor baselines for the trained PPO policy |
 
 ---
 

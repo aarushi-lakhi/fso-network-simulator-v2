@@ -33,12 +33,20 @@ ns-3-dev/.lock-ns3_*
 # ── GNU Radio ─────────────────────────────────────────────────────────────────
 gr-*/build/
 
+# ── ML training artifacts (tensorboard event dirs — regenerate locally) ───────
+ns3-rl-router/agent/runs/
+
 # ── Simulation outputs (large — generate locally, don't commit) ───────────────
 *.pcap
 *.tr
 *.xml
 results/*.csv
 results/*.dat
+
+# ── Benchmarks (Phase 5): commit small result CSVs + plots, not checkpoints ───
+benchmarks/results/checkpoints/
+!benchmarks/results/raw_results.csv
+!benchmarks/results/summary.csv
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store

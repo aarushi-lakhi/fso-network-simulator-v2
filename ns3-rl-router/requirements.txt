@@ -1,0 +1,9 @@
+# Phase 4 — DRL routing agent (Python 3.11; ns3-ai bindings target 3.11)
+torch==2.12.1
+gymnasium==1.3.0
+numpy==2.4.6
+PyYAML==6.0.3
+tensorboard==2.21.0
+matplotlib==3.11.0
+pytest==9.1.1
+pytest-cov==7.1.0
