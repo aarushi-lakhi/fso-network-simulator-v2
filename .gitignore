@@ -33,6 +33,9 @@ ns-3-dev/.lock-ns3_*
 # ── GNU Radio ─────────────────────────────────────────────────────────────────
 gr-*/build/
 
+# ── ML training artifacts (tensorboard event dirs — regenerate locally) ───────
+ns3-rl-router/agent/runs/
+
 # ── Simulation outputs (large — generate locally, don't commit) ───────────────
 *.pcap
 *.tr
