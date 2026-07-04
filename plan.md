@@ -1,7 +1,7 @@
 # FSO Network Simulator — Project Plan
 
 > **Living document.** Update this file as phases complete, decisions change, or scope shifts.
-> Last updated: 2026-07-17 — all phases complete; see the tracker and `README.md`
+> Last updated: 2026-07-18 — all ten phases complete; see the tracker, `README.md`, and `RETROSPECTIVE.md`
 
 ---
 
