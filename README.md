@@ -122,10 +122,11 @@ Full analysis across all four studies in
 | [`prototype/`](prototype/) | Pure-Python Gamma-Gamma model (i.i.d. + correlated), 64 tests, publication plots |
 | [`gr-fso-turbulence/`](gr-fso-turbulence/) | GNU Radio 3.10 OOT module: fading channel block + GRC demo |
 | [`ns3-fso-channel/`](ns3-fso-channel/) | ns-3 contrib module: loss model, topology helper, test suite |
-| [`ns3-rl-router/`](ns3-rl-router/) | ns3-ai Gym env (C++) + PPO agent (PyTorch), 36 tests |
+| [`ns3-rl-router/`](ns3-rl-router/) | ns3-ai Gym env (C++) + PPO/DQN/imitation agents (PyTorch), 88 tests |
 | [`benchmarks/`](benchmarks/) | Comparison study: orchestrator, aggregation, plots, results |
 | [`setup/`](setup/) | macOS install scripts (GNU Radio, ns-3.40, ns3-ai) + env verification |
 | [`plan.md`](plan.md) | Living project plan: phases, decisions log, conventions |
+| [`RETROSPECTIVE.md`](RETROSPECTIVE.md) | The full story: every phase's what/why/tradeoffs/lessons, and the war stories |
 
 ## Getting started (macOS)
 
