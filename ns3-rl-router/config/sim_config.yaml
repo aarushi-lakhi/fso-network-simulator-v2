@@ -26,6 +26,10 @@ episode_steps: 100
 step_time_s: 0.1
 update_interval_ms: 1.0
 
+# fading temporal correlation (ns-3 Time strings; 0ms = i.i.d. block fading)
+coherence_large: 0ms
+coherence_small: 0ms
+
 # traffic
 traffic_rate: 2Mbps
 
