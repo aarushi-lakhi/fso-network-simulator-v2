@@ -8,8 +8,13 @@ Python RL agent through ns3-ai's Gym interface (shared memory, no sockets).
 **Topology.** 5 nodes on an 800 m radius pentagon, 7 FSO links (the ring
 `0-1-2-3-4-0` plus cross links `0-2` and `1-3`), built with
 `FsoTopologyHelper`. Every link's packet error rate follows Gamma-Gamma
-block fading at the configured `C2n`. One UDP flow runs from node 0 to
-node 3.
+block fading at the configured `C2n`. With `coherenceLarge` /
+`coherenceSmall` at their `0ms` defaults successive fading blocks are
+i.i.d.; positive values make each link direction's irradiance a
+temporally correlated Gamma-Gamma process with those component
+coherence times (Phase 6, see
+`ns3-fso-channel/model/correlated-gamma-gamma-fading.h`). One UDP flow
+runs from node 0 to node 3.
 
 **Observation** — `Box(low=-1e6, high=1e6, shape=[28], float64)`, four
 features per link, links in install order
@@ -18,7 +23,7 @@ features per link, links in install order
 | offset | feature | meaning |
 |---|---|---|
 | `4i+0` | `snrMarginDb` | mean SNR margin: `TxPowerDbm − extinctionDb(d) − NoiseDbm` |
-| `4i+1` | `dropRate` | `PhyRxDrop / (PhyRxDrop + PhyRxEnd)` over the last step, both directions; `1.0` if the link carried nothing |
+| `4i+1` | `linkPer` | current packet error rate of the link: mean of the two directions' `RateErrorModel` rates, i.e. the fading bridge's latest channel state. Defined for idle links too (physically: FSO transceivers track per-link beacon power continuously), so the agent can compare off-route link quality; under correlated fading it predicts the link's near future. (Until Phase 6 this slot held the empirical per-step drop rate, which was a `1.0` sentinel on idle links — invisible off-route state.) |
 | `4i+2` | `scintIndex` | `1/α + 1/β + 1/(αβ)` from the loss model's α, β at the current `C2n` and link distance |
 | `4i+3` | `queuePkts` | packets waiting in the two device TX queues |
 
@@ -42,9 +47,10 @@ r = − dropWeight   · phyDrops          (PhyRxDrop total, all links)
 ```
 
 **Episode.** Fixed number of decision steps (`episodeSteps`, one per
-`stepTime`); the ns-3 process then signals `done` and exits. `C2n`, episode
-length, link budget and reward weights are all command-line arguments
-(defaults mirror `../config/sim_config.yaml`).
+`stepTime`); the ns-3 process then signals `done` and exits. `C2n`,
+fading coherence times, episode length, decision interval, link budget
+and reward weights are all command-line arguments (defaults mirror
+`../config/sim_config.yaml`).
 
 ## Build mechanism
 
