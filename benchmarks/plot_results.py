@@ -36,16 +36,18 @@ REGIME_LABELS = {
 }
 
 # Phase 6 correlated-fading study (strong turbulence throughout)
-COHERENCE_ORDER = ("iid", "tau100-20", "tau500-100")
+COHERENCE_ORDER = ("iid", "tau100-20", "tau500-100", "tau500-100-step50")
 COHERENCE_LABELS = {
     "iid": "i.i.d.\nτ = 0 (control)",
     "tau100-20": "τ_L/τ_S = 100/20 ms\n50 ms steps",
     "tau500-100": "τ_L/τ_S = 500/100 ms\n100 ms steps",
+    "tau500-100-step50": "τ_L/τ_S = 500/100 ms\n50 ms steps",
 }
 
 # Fixed policy -> color assignment (identity encoding, never re-ranked)
 POLICY_COLORS = {
     "ppo": "#0072B2",
+    "ppo-per": "#D55E00",
     "ppo-transfer": "#56B4E9",
     "best-static": "#009E73",
     "random": "#E69F00",
@@ -54,6 +56,7 @@ POLICY_COLORS = {
 
 POLICY_LABELS = {
     "ppo": "PPO (per-regime)",
+    "ppo-per": "PPO (PER observation)",
     "ppo-transfer": "PPO (1e-13 ckpt)",
     "best-static": "Best static route",
     "random": "Random",
