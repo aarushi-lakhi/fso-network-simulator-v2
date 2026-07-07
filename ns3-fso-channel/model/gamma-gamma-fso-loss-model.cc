@@ -61,7 +61,21 @@ GammaGammaFsoLossModel::GetTypeId()
                           "Whether the random Gamma-Gamma fading term is applied.",
                           BooleanValue(true),
                           MakeBooleanAccessor(&GammaGammaFsoLossModel::m_turbulence),
-                          MakeBooleanChecker());
+                          MakeBooleanChecker())
+            .AddAttribute("CoherenceTimeLargeScale",
+                          "Coherence time of the large-scale (alpha) fading component. "
+                          "Zero (default) keeps the historical i.i.d. per-call draws.",
+                          TimeValue(Seconds(0)),
+                          MakeTimeAccessor(&GammaGammaFsoLossModel::SetCoherenceTimeLargeScale,
+                                           &GammaGammaFsoLossModel::GetCoherenceTimeLargeScale),
+                          MakeTimeChecker())
+            .AddAttribute("CoherenceTimeSmallScale",
+                          "Coherence time of the small-scale (beta) fading component. "
+                          "Zero (default) keeps the historical i.i.d. per-call draws.",
+                          TimeValue(Seconds(0)),
+                          MakeTimeAccessor(&GammaGammaFsoLossModel::SetCoherenceTimeSmallScale,
+                                           &GammaGammaFsoLossModel::GetCoherenceTimeSmallScale),
+                          MakeTimeChecker());
     return tid;
 }
 
@@ -70,11 +84,44 @@ GammaGammaFsoLossModel::GammaGammaFsoLossModel()
 {
     NS_LOG_FUNCTION(this);
     m_rng = CreateObject<GammaRandomVariable>();
+    m_correlatedFading = CreateObject<CorrelatedGammaGammaFading>();
 }
 
 GammaGammaFsoLossModel::~GammaGammaFsoLossModel()
 {
     NS_LOG_FUNCTION(this);
+}
+
+void
+GammaGammaFsoLossModel::SetCoherenceTimeLargeScale(Time tau)
+{
+    m_tauLargeScale = tau;
+    m_correlatedFading->SetAttribute("CoherenceTimeLargeScale", TimeValue(tau));
+}
+
+Time
+GammaGammaFsoLossModel::GetCoherenceTimeLargeScale() const
+{
+    return m_tauLargeScale;
+}
+
+void
+GammaGammaFsoLossModel::SetCoherenceTimeSmallScale(Time tau)
+{
+    m_tauSmallScale = tau;
+    m_correlatedFading->SetAttribute("CoherenceTimeSmallScale", TimeValue(tau));
+}
+
+Time
+GammaGammaFsoLossModel::GetCoherenceTimeSmallScale() const
+{
+    return m_tauSmallScale;
+}
+
+bool
+GammaGammaFsoLossModel::IsTurbulenceEnabled() const
+{
+    return m_turbulence;
 }
 
 double
@@ -109,6 +156,11 @@ GammaGammaFsoLossModel::GetFadingSample(double distance)
         return 1.0;
     }
     auto [alpha, beta] = GetAlphaBeta(distance);
+    if (m_tauLargeScale.IsStrictlyPositive() || m_tauSmallScale.IsStrictlyPositive())
+    {
+        return m_correlatedFading->GetSample(alpha, beta);
+    }
+    // Historical i.i.d. path, kept bit-identical for zero coherence times
     double largeScale = m_rng->GetValue(alpha, 1.0 / alpha);
     double smallScale = m_rng->GetValue(beta, 1.0 / beta);
     return largeScale * smallScale;
@@ -146,7 +198,7 @@ int64_t
 GammaGammaFsoLossModel::DoAssignStreams(int64_t stream)
 {
     m_rng->SetStream(stream);
-    return 1;
+    return 1 + m_correlatedFading->AssignStreams(stream + 1);
 }
 
 } // namespace ns3
