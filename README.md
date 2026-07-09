@@ -67,8 +67,16 @@ Benchmarked against classical baselines over 10 shared-seed episodes per cell
 **The honest finding:** PPO converges to *exactly* the optimal policy — which, under
 i.i.d. millisecond block fading with 100 ms decision steps, is "hold the best route."
 It beats random by 41% and AODV (which pays real control overhead) by 15%, and matches
-the best static route byte-for-byte per seed. Making RL *beat* static routing requires
-temporally correlated fading with a realistic coherence time — the motivated next step.
+the best static route byte-for-byte per seed.
+
+**The follow-up (Phase 6)** added temporally correlated fading — a Gaussian copula
+AR(1) per Gamma component that preserves the exact Gamma-Gamma marginal while making
+coherence time tunable — and re-ran the study. Channel memory turned out to be
+necessary but not sufficient: even at τ = 500 ms with 50 ms decision steps, PPO still
+converges to constant-route policies, because the per-episode variance dwarfs the
+margin a well-timed switch buys. Full analysis and what would change the answer
+(recurrent policies, disjoint routes, TCP traffic) in
+[`benchmarks/results/README.md`](benchmarks/results/README.md).
 
 ## Repository layout
 
