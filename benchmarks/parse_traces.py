@@ -27,8 +27,9 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 # configs (the two studies live in separate CSVs and never mix labels).
 REGIME_ORDER = ("weak", "moderate", "strong", "iid", "tau100-20", "tau500-100",
                 "tau500-100-step50")
-POLICY_ORDER = ("ppo", "ppo-per", "ppo-transfer", "best-static", "static-0",
-                "static-1", "static-2", "static-3", "random", "aodv")
+POLICY_ORDER = ("ppo", "ppo-per", "ppo-per-ent", "ppo-transfer", "best-static",
+                "static-0", "static-1", "static-2", "static-3", "random",
+                "aodv")
 
 METRICS = ("reward", "drops", "pdr", "mean_delay_ms")
 
@@ -37,8 +38,8 @@ SUMMARY_FIELDS = ("regime", "policy", "detail", "n_episodes",
 
 # Policies shown in the printed table and the plots; individual static
 # routes stay in summary.csv for reference.
-HEADLINE_POLICIES = ("ppo", "ppo-per", "ppo-transfer", "best-static", "random",
-                     "aodv")
+HEADLINE_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-transfer",
+                     "best-static", "random", "aodv")
 
 
 def load_raw(path: str | Path) -> list[dict]:

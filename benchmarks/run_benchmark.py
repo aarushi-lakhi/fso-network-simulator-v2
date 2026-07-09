@@ -82,11 +82,26 @@ TRAIN_STEPS: dict[str, int] = {"weak": 20_000, "moderate": 40_000, "strong": 80_
 POLICIES = ("ppo", "ppo-transfer", "static-0", "static-1", "static-2", "static-3",
             "random", "aodv")
 
-# ppo-per is the Phase 6 iteration variant: PPO trained after the env's
+# Phase 6 iteration variants: ppo-per is PPO trained after the env's
 # drop-rate observation was replaced by the per-link PER (the correlated
-# channel state, visible for off-route links too). The first-pass "ppo"
+# channel state, visible for off-route links too); the first-pass "ppo"
 # rows of the correlated study predate that observation change.
-ALL_POLICIES = ("ppo", "ppo-per", *POLICIES[1:])
+# ppo-per-ent additionally trains with entropy_coef 0.03 and a 160k-step
+# budget (trained via the train.py CLI, see results/README.md; this
+# orchestrator only evaluates its checkpoint). greedy-per is a scripted
+# reactive baseline: hold the current route, switch to the route with the
+# lowest summed link PER when it beats the current one by GREEDY_MARGIN.
+ALL_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "greedy-per", *POLICIES[1:])
+
+# Candidate routes as link indices into the observation (install order
+# (0,1) (1,2) (2,3) (3,4) (4,0) (0,2) (1,3); see sim/README.md):
+#   route 0: 0-2-3, route 1: 0-1-3, route 2: 0-4-3, route 3: 0-1-2-3
+ROUTE_LINKS = ((5, 2), (0, 6), (4, 3), (0, 1, 2))
+
+# Hysteresis for greedy-per [summed PER]: at ~12 packets per 0.1 s step a
+# sustained PER-sum improvement of 0.1 repays the flap penalty of 5 in
+# about two steps.
+GREEDY_MARGIN = 0.1
 
 
 @dataclass(frozen=True)
@@ -302,6 +317,19 @@ def _action_fn_for(policy: str, env, seed: int) -> Callable[[np.ndarray], int]:
     if policy.startswith("static-"):
         route = int(policy.split("-", 1)[1])
         return lambda _obs: route
+    if policy == "greedy-per":
+        current = 0  # env installs route 0 initially
+
+        def act_greedy_per(obs: np.ndarray) -> int:
+            nonlocal current
+            per = np.asarray(obs, dtype=np.float64).reshape(-1, 4)[:, 1]
+            costs = [float(sum(per[i] for i in links)) for links in ROUTE_LINKS]
+            best = int(np.argmin(costs))
+            if costs[best] < costs[current] - GREEDY_MARGIN:
+                current = best
+            return current
+
+        return act_greedy_per
     if policy == "random":
         rng = np.random.default_rng(seed)
         return lambda _obs: int(rng.integers(n_actions))
