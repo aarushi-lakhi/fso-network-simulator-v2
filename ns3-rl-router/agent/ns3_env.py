@@ -96,6 +96,10 @@ def make_ns3_env(
     c2n: str | float | None = None,
     seed: int | None = None,
     ns3_path: str = DEFAULT_NS3_PATH,
+    coherence_large: str | None = None,
+    coherence_small: str | None = None,
+    step_time_s: str | float | None = None,
+    episode_steps: int | None = None,
 ) -> gym.Env:
     """Create the real FSO routing environment backed by ns-3.
 
@@ -107,6 +111,15 @@ def make_ns3_env(
             advance it by one per reset. Defaults to ``sim_seed`` from
             the config file.
         ns3_path: ns-3 root directory containing the built fso-rl-env.
+        coherence_large: Optional override of the large-scale fading
+            coherence time (ns-3 Time string, e.g. ``"500ms"``;
+            ``"0ms"`` means i.i.d. block fading).
+        coherence_small: Optional override of the small-scale fading
+            coherence time (same format as ``coherence_large``).
+        step_time_s: Optional override of the agent decision interval
+            [s], e.g. ``0.05``.
+        episode_steps: Optional override of the number of decision
+            steps per episode.
 
     Returns:
         A Gymnasium env with Box(28) observations and Discrete(4) actions.
@@ -114,6 +127,14 @@ def make_ns3_env(
     config = load_flat_yaml(config_path)
     sim_seed = seed if seed is not None else int(config.get("sim_seed", "1"))
     settings = ns3_settings(config, sim_seed)
-    if c2n is not None:
-        settings["c2n"] = str(c2n)
+    overrides = {
+        "c2n": c2n,
+        "coherenceLarge": coherence_large,
+        "coherenceSmall": coherence_small,
+        "stepTime": step_time_s,
+        "episodeSteps": episode_steps,
+    }
+    for key, value in overrides.items():
+        if value is not None:
+            settings[key] = str(value)
     return FsoNs3Env(targetName="fso-rl-env", ns3Path=ns3_path, ns3Settings=settings)

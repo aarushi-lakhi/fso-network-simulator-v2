@@ -86,6 +86,8 @@ def ns3_settings(config: dict[str, str], seed: int) -> dict[str, str]:
         "episodeSteps": config["episode_steps"],
         "stepTime": config["step_time_s"],
         "updateIntervalMs": config["update_interval_ms"],
+        "coherenceLarge": config.get("coherence_large", "0ms"),
+        "coherenceSmall": config.get("coherence_small", "0ms"),
         "txPowerDbm": config["tx_power_dbm"],
         "noiseDbm": config["noise_dbm"],
         "wavelength": config["wavelength_m"],

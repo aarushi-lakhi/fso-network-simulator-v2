@@ -1,13 +1,16 @@
 """Aggregate raw benchmark episodes into a policy x regime summary table.
 
-Reads results/raw_results.csv (written by run_benchmark.py), computes
-mean +/- std of reward, PHY drops, PDR, and mean delay per (regime,
-policy), collapses the four fixed routes into a single ``best-static``
-policy (the route with the highest mean episode reward per regime),
-prints the table, and writes results/summary.csv.
+Reads a raw episode CSV written by run_benchmark.py, computes mean +/-
+std of reward, PHY drops, PDR, and mean delay per (regime, policy),
+collapses the four fixed routes into a single ``best-static`` policy
+(the route with the highest mean episode reward per regime), prints the
+table, and writes the summary CSV. The ``regime`` column holds the
+turbulence regime (Phase 5 study) or the fading coherence config name
+(Phase 6 correlated study); the aggregation is identical.
 
 Typical usage:
-    $ python parse_traces.py
+    $ python parse_traces.py                      # Phase 5 raw_results.csv
+    $ python parse_traces.py --study correlated   # Phase 6 correlated_raw.csv
     $ python parse_traces.py --raw path/to/raw.csv --out path/to/summary.csv
 """
 
@@ -20,9 +23,13 @@ from pathlib import Path
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
-REGIME_ORDER = ("weak", "moderate", "strong")
-POLICY_ORDER = ("ppo", "ppo-transfer", "best-static", "static-0", "static-1",
-                "static-2", "static-3", "random", "aodv")
+# Canonical row order: Phase 5 turbulence regimes, then Phase 6 coherence
+# configs (the two studies live in separate CSVs and never mix labels).
+REGIME_ORDER = ("weak", "moderate", "strong", "iid", "tau100-20", "tau500-100",
+                "tau500-100-step50")
+POLICY_ORDER = ("ppo", "ppo-per", "ppo-per-ent", "ppo-transfer", "best-static",
+                "static-0", "static-1", "static-2", "static-3", "random",
+                "aodv")
 
 METRICS = ("reward", "drops", "pdr", "mean_delay_ms")
 
@@ -31,7 +38,8 @@ SUMMARY_FIELDS = ("regime", "policy", "detail", "n_episodes",
 
 # Policies shown in the printed table and the plots; individual static
 # routes stay in summary.csv for reference.
-HEADLINE_POLICIES = ("ppo", "ppo-transfer", "best-static", "random", "aodv")
+HEADLINE_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-transfer",
+                     "best-static", "random", "aodv")
 
 
 def load_raw(path: str | Path) -> list[dict]:
@@ -172,13 +180,20 @@ def write_summary(path: str | Path, summary: list[dict]) -> None:
 def main() -> None:
     """CLI entry point: aggregate the raw CSV and print the table."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--raw", type=str, default=str(RESULTS_DIR / "raw_results.csv"),
+    parser.add_argument("--study", choices=("turbulence", "correlated"),
+                        default="turbulence",
+                        help="picks the default --raw/--out file pair")
+    parser.add_argument("--raw", type=str, default=None,
                         help="input raw episode CSV")
-    parser.add_argument("--out", type=str, default=str(RESULTS_DIR / "summary.csv"),
+    parser.add_argument("--out", type=str, default=None,
                         help="output summary CSV")
     parser.add_argument("--all-policies", action="store_true",
                         help="print every policy, including each static route")
     args = parser.parse_args()
+    stem = "correlated_raw" if args.study == "correlated" else "raw_results"
+    out_stem = "correlated_summary" if args.study == "correlated" else "summary"
+    args.raw = args.raw or str(RESULTS_DIR / f"{stem}.csv")
+    args.out = args.out or str(RESULTS_DIR / f"{out_stem}.csv")
 
     rows = load_raw(args.raw)
     summary = summarize(rows)
