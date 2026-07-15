@@ -15,12 +15,10 @@ All plots are also available as importable functions for use in notebooks.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Optional
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import numpy as np
 
 from gamma_gamma import (
