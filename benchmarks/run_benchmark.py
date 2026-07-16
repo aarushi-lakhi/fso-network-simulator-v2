@@ -170,12 +170,15 @@ CORRELATED_POLICIES = tuple(p for p in ALL_POLICIES if p != "ppo-transfer")
 # route). The iid cell is the control where holding the best route is
 # provably optimal; the tau500 cells add channel memory (UDP) and then
 # non-linear loss compounding (TCP). Both correlated cells use 50 ms
-# decision steps: a Phase 7 probe on the disjoint topology (see
-# results/README.md) matched Phase 6 — the linkPer observation's lag-1
-# autocorrelation across steps is ~0.6 at 50 ms vs ~0.4 at 100 ms, and
-# 50 ms gives the agent ~10 decisions per large-scale fade epoch
-# (tau_L = 500 ms) instead of 5. 200 steps keep the 10 s episode;
-# train and eval share each cell's step settings.
+# decision steps: a probe of the linkPer observation on the disjoint
+# topology at tau 500/100 ms (held route, 3 episodes x 7 links)
+# measured a lag-1 autocorrelation across steps of 0.46 at 50 ms vs
+# 0.28 at 100 ms — the disjoint links are longer than the pentagon's,
+# so the channel decorrelates faster per step and the finer step is
+# needed to keep the state observable — and 50 ms gives the agent ~10
+# decisions per large-scale fade epoch (tau_L = 500 ms) instead of 5.
+# 200 steps keep the 10 s episode; train and eval share each cell's
+# step settings.
 ADAPTATION_CONFIGS: dict[str, CoherenceConfig] = {
     "disjoint-iid-udp": CoherenceConfig(
         "0ms", "0ms", topology="disjoint", traffic_protocol="udp"),
