@@ -1,5 +1,7 @@
 # FSO Network Simulator
 
+[![ci](https://github.com/aarushi-lakhi/fso-network-simulator-v2/actions/workflows/ci.yml/badge.svg)](https://github.com/aarushi-lakhi/fso-network-simulator-v2/actions/workflows/ci.yml)
+
 A cross-layer **Free-Space Optical (FSO) network simulator** that connects physical-layer
 atmospheric turbulence to network-layer routing decisions — and trains a deep RL agent to
 route around the weather.
