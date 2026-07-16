@@ -1,10 +1,15 @@
 # FSO RL environment configuration. Flat keys; read by the Python side
 # (check_env.py, agent/) and mapped onto fso-rl-env command-line arguments.
 
-# topology
+# topology: pentagon (shared-link routes) or disjoint (link-disjoint routes;
+# direct 0-3 link of disjoint_direct_m plus three 2-hop relays with hops of
+# disjoint_relay_m — see sim/README.md for the geometry)
+topology: pentagon
 num_nodes: 5
 num_links: 7
 mesh_radius_m: 800.0
+disjoint_direct_m: 1500.0
+disjoint_relay_m: 900.0
 data_rate: 100Mbps
 channel_delay_us: 5
 
@@ -30,7 +35,9 @@ update_interval_ms: 1.0
 coherence_large: 0ms
 coherence_small: 0ms
 
-# traffic
+# traffic (udp or tcp; tcp swaps the reward's drops term for a
+# goodput-shortfall term weighted by reward_goodput_weight)
+traffic_protocol: udp
 traffic_rate: 2Mbps
 
 # reward weights
@@ -38,6 +45,7 @@ reward_drop_weight: 1.0
 reward_delay_weight: 0.1
 reward_flap_penalty: 5.0
 reward_energy_weight: 0.01
+reward_goodput_weight: 1.0
 
 # rng
 sim_seed: 1

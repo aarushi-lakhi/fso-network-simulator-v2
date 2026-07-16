@@ -100,6 +100,8 @@ def make_ns3_env(
     coherence_small: str | None = None,
     step_time_s: str | float | None = None,
     episode_steps: int | None = None,
+    topology: str | None = None,
+    traffic_protocol: str | None = None,
 ) -> gym.Env:
     """Create the real FSO routing environment backed by ns-3.
 
@@ -120,6 +122,10 @@ def make_ns3_env(
             [s], e.g. ``0.05``.
         episode_steps: Optional override of the number of decision
             steps per episode.
+        topology: Optional override of the mesh layout (``"pentagon"``
+            or ``"disjoint"``, see sim/README.md).
+        traffic_protocol: Optional override of the 0->3 flow's
+            transport (``"udp"`` or ``"tcp"``).
 
     Returns:
         A Gymnasium env with Box(28) observations and Discrete(4) actions.
@@ -133,6 +139,8 @@ def make_ns3_env(
         "coherenceSmall": coherence_small,
         "stepTime": step_time_s,
         "episodeSteps": episode_steps,
+        "topology": topology,
+        "trafficProtocol": traffic_protocol,
     }
     for key, value in overrides.items():
         if value is not None:

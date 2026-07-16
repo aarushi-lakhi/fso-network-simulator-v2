@@ -93,13 +93,18 @@ def ns3_settings(config: dict[str, str], seed: int) -> dict[str, str]:
         "wavelength": config["wavelength_m"],
         "extinction": config["extinction_coeff_per_m"],
         "meshRadius": config["mesh_radius_m"],
+        "topology": config.get("topology", "pentagon"),
+        "disjointDirectM": config.get("disjoint_direct_m", "1500.0"),
+        "disjointRelayM": config.get("disjoint_relay_m", "900.0"),
         "dataRate": config["data_rate"],
+        "trafficProtocol": config.get("traffic_protocol", "udp"),
         "trafficRate": config["traffic_rate"],
         "packetSize": config["packet_size_bytes"],
         "dropWeight": config["reward_drop_weight"],
         "delayWeight": config["reward_delay_weight"],
         "flapPenalty": config["reward_flap_penalty"],
         "energyWeight": config["reward_energy_weight"],
+        "goodputWeight": config.get("reward_goodput_weight", "1.0"),
         "simSeed": str(seed),
     }
 
