@@ -37,9 +37,9 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 REGIME_ORDER = ("weak", "moderate", "strong", "iid", "tau100-20", "tau500-100",
                 "tau500-100-step50", "disjoint-iid-udp", "disjoint-tau500-udp",
                 "disjoint-tau500-tcp")
-POLICY_ORDER = ("ppo", "ppo-per", "ppo-per-ent", "ppo-transfer", "best-static",
-                "static-0", "static-1", "static-2", "static-3", "random",
-                "aodv")
+POLICY_ORDER = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "ppo-transfer",
+                "best-static", "static-0", "static-1", "static-2", "static-3",
+                "greedy-per", "random", "aodv")
 
 # goodput_mbps/retx/switches only exist in Phase 7 CSVs; older raw CSVs
 # aggregate them as 0.
@@ -51,8 +51,9 @@ SUMMARY_FIELDS = ("regime", "policy", "detail", "n_episodes",
 
 # Policies shown in the printed table and the plots; individual static
 # routes stay in summary.csv for reference.
-HEADLINE_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-transfer",
-                     "best-static", "random", "aodv")
+HEADLINE_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack",
+                     "ppo-transfer", "best-static", "greedy-per", "random",
+                     "aodv")
 
 
 def load_raw(path: str | Path) -> list[dict]:

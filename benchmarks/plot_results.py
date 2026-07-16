@@ -62,8 +62,10 @@ POLICY_COLORS = {
     "ppo": "#0072B2",
     "ppo-per": "#D55E00",
     "ppo-per-ent": "#F0E442",
+    "ppo-stack": "#000000",
     "ppo-transfer": "#56B4E9",
     "best-static": "#009E73",
+    "greedy-per": "#999999",
     "random": "#E69F00",
     "aodv": "#CC79A7",
 }
@@ -72,8 +74,10 @@ POLICY_LABELS = {
     "ppo": "PPO (per-regime)",
     "ppo-per": "PPO (PER observation)",
     "ppo-per-ent": "PPO (PER obs, 160k, ent 0.03)",
+    "ppo-stack": "PPO (8-frame stack, 160k)",
     "ppo-transfer": "PPO (1e-13 ckpt)",
     "best-static": "Best static route",
+    "greedy-per": "Greedy PER (scripted)",
     "random": "Random",
     "aodv": "AODV",
 }
