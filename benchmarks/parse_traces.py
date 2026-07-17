@@ -14,11 +14,19 @@ config name (Phase 6 correlated study), or the environment config name
 per-episode (shared-seed) comparison of PPO against the best static
 route per regime, with win/tie/loss counts and switching statistics.
 
+``--study imitation`` (Phase 8) reads imitation_raw.csv and merges in
+the committed adaptation_raw.csv rows of the same regimes (ppo,
+statics, greedy-per, ... — measured in Phase 7 on the same seeds and
+settings, so they are directly comparable and are not re-run). Its
+``--paired`` mode compares bc, bc-ppo, and greedy-per against
+best-static, plus bc-ppo against bc (the fine-tuning delta itself).
+
 Typical usage:
     $ python parse_traces.py                      # Phase 5 raw_results.csv
     $ python parse_traces.py --study correlated   # Phase 6 correlated_raw.csv
     $ python parse_traces.py --study adaptation   # Phase 7 adaptation_raw.csv
     $ python parse_traces.py --study adaptation --paired
+    $ python parse_traces.py --study imitation [--paired]
     $ python parse_traces.py --raw path/to/raw.csv --out path/to/summary.csv
 """
 
@@ -37,7 +45,8 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 REGIME_ORDER = ("weak", "moderate", "strong", "iid", "tau100-20", "tau500-100",
                 "tau500-100-step50", "disjoint-iid-udp", "disjoint-tau500-udp",
                 "disjoint-tau500-tcp")
-POLICY_ORDER = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "ppo-transfer",
+POLICY_ORDER = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "bc", "bc-ppo",
+                "ppo-transfer",
                 "best-static", "static-0", "static-1", "static-2", "static-3",
                 "greedy-per", "random", "aodv")
 
@@ -51,9 +60,9 @@ SUMMARY_FIELDS = ("regime", "policy", "detail", "n_episodes",
 
 # Policies shown in the printed table and the plots; individual static
 # routes stay in summary.csv for reference.
-HEADLINE_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack",
-                     "ppo-transfer", "best-static", "greedy-per", "random",
-                     "aodv")
+HEADLINE_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "bc",
+                     "bc-ppo", "ppo-transfer", "best-static", "greedy-per",
+                     "random", "aodv")
 
 
 def load_raw(path: str | Path) -> list[dict]:
@@ -82,6 +91,106 @@ def load_raw(path: str | Path) -> list[dict]:
                 row[key] = int(raw.get(key) or 0)
             rows.append(row)
     return rows
+
+
+def merge_reference_rows(rows: list[dict], reference: list[dict]) -> list[dict]:
+    """Merge committed baseline rows of another study into these rows.
+
+    Used by the imitation study to place the Phase 7 baselines (ppo,
+    static routes, greedy-per, ...) next to the bc/bc-ppo rows without
+    re-measuring them: reference rows are added when their regime
+    appears in ``rows`` and that (regime, policy) group is not already
+    present.
+
+    Args:
+        rows: Typed raw rows of the primary study.
+        reference: Typed raw rows of the reference study.
+
+    Returns:
+        Combined row list (primary rows first).
+    """
+    regimes = {r["regime"] for r in rows}
+    present = {(r["regime"], r["policy"]) for r in rows}
+    merged = list(rows)
+    merged.extend(r for r in reference
+                  if r["regime"] in regimes
+                  and (r["regime"], r["policy"]) not in present)
+    return merged
+
+
+def paired_policies(rows: list[dict], policy_a: str,
+                    policy_b: str) -> list[dict]:
+    """Compare two policies episode-by-episode on their shared seeds.
+
+    Args:
+        rows: Typed raw rows from :func:`load_raw`.
+        policy_a: Policy whose deltas are reported (A minus B).
+        policy_b: Baseline policy.
+
+    Returns:
+        One dict per regime where both policies have rows, with regime,
+        n, reward_delta_mean/std, pdr_delta_mean, wins/ties/losses, and
+        both policies' mean switch counts.
+    """
+    regimes = sorted({r["regime"] for r in rows},
+                     key=lambda x: (REGIME_ORDER.index(x)
+                                    if x in REGIME_ORDER else 99))
+    results: list[dict] = []
+    for regime in regimes:
+        by_policy: dict[str, dict[int, dict]] = {}
+        for row in rows:
+            if row["regime"] == regime and row["policy"] in (policy_a, policy_b):
+                by_policy.setdefault(row["policy"], {})[row["sim_seed"]] = row
+        if policy_a not in by_policy or policy_b not in by_policy:
+            continue
+        a, b = by_policy[policy_a], by_policy[policy_b]
+        seeds = sorted(set(a) & set(b))
+        if not seeds:
+            continue
+        deltas = [a[s]["reward"] - b[s]["reward"] for s in seeds]
+        pdr_deltas = [a[s]["pdr"] - b[s]["pdr"] for s in seeds]
+        delta_mean, delta_std = _mean_std(deltas)
+        pdr_delta_mean, _ = _mean_std(pdr_deltas)
+        results.append({
+            "regime": regime,
+            "n": len(seeds),
+            "reward_delta_mean": delta_mean,
+            "reward_delta_std": delta_std,
+            "pdr_delta_mean": pdr_delta_mean,
+            "wins": sum(d > 0 for d in deltas),
+            "ties": sum(d == 0 for d in deltas),
+            "losses": sum(d < 0 for d in deltas),
+            "switches_a_mean": sum(a[s]["switches"] for s in seeds) / len(seeds),
+            "switches_b_mean": sum(b[s]["switches"] for s in seeds) / len(seeds),
+        })
+    return results
+
+
+def format_paired_policies(results: list[dict], policy_a: str,
+                           policy_b: str) -> str:
+    """Render a two-policy paired comparison as a text table.
+
+    Args:
+        results: Rows from :func:`paired_policies`.
+        policy_a: Policy whose deltas are reported.
+        policy_b: Baseline policy.
+
+    Returns:
+        Multi-line table string.
+    """
+    header = (f"{'regime':20s} {'n':>3s} {'reward delta':>19s} "
+              f"{'PDR delta':>10s} {'W/T/L':>8s} "
+              f"{'sw(' + policy_a + ')':>14s} {'sw(' + policy_b + ')':>14s}")
+    lines = [f"paired per-episode comparison: {policy_a} minus {policy_b} "
+             f"(shared seeds)", header, "-" * len(header)]
+    for row in results:
+        wtl = f"{row['wins']}/{row['ties']}/{row['losses']}"
+        lines.append(
+            f"{row['regime']:20s} {row['n']:3d} "
+            f"{row['reward_delta_mean']:10.1f} +/- {row['reward_delta_std']:5.1f} "
+            f"{row['pdr_delta_mean']:+10.3f} {wtl:>8s} "
+            f"{row['switches_a_mean']:14.1f} {row['switches_b_mean']:14.1f}")
+    return "\n".join(lines)
 
 
 def _mean_std(values: list[float]) -> tuple[float, float]:
@@ -312,7 +421,8 @@ def write_summary(path: str | Path, summary: list[dict]) -> None:
 def main() -> None:
     """CLI entry point: aggregate the raw CSV and print the table."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--study", choices=("turbulence", "correlated", "adaptation"),
+    parser.add_argument("--study", choices=("turbulence", "correlated",
+                                            "adaptation", "imitation"),
                         default="turbulence",
                         help="picks the default --raw/--out file pair")
     parser.add_argument("--raw", type=str, default=None,
@@ -327,18 +437,32 @@ def main() -> None:
     args = parser.parse_args()
     stems = {"turbulence": ("raw_results", "summary"),
              "correlated": ("correlated_raw", "correlated_summary"),
-             "adaptation": ("adaptation_raw", "adaptation_summary")}
+             "adaptation": ("adaptation_raw", "adaptation_summary"),
+             "imitation": ("imitation_raw", "imitation_summary")}
     stem, out_stem = stems[args.study]
     args.raw = args.raw or str(RESULTS_DIR / f"{stem}.csv")
     args.out = args.out or str(RESULTS_DIR / f"{out_stem}.csv")
 
     rows = load_raw(args.raw)
+    if args.study == "imitation":
+        reference_csv = RESULTS_DIR / "adaptation_raw.csv"
+        if reference_csv.exists():
+            rows = merge_reference_rows(rows, load_raw(reference_csv))
     if args.paired:
-        print(format_paired(paired_ppo_vs_best_static(rows)))
+        if args.study == "imitation":
+            for policy in ("bc", "bc-ppo", "greedy-per"):
+                print(format_paired(paired_ppo_vs_best_static(rows, policy),
+                                    policy))
+                print()
+            print(format_paired_policies(paired_policies(rows, "bc-ppo", "bc"),
+                                         "bc-ppo", "bc"))
+        else:
+            print(format_paired(paired_ppo_vs_best_static(rows)))
         return
     summary = summarize(rows)
     policies = POLICY_ORDER if args.all_policies else HEADLINE_POLICIES
-    print(format_table(summary, policies, extended=args.study == "adaptation"))
+    extended = args.study in ("adaptation", "imitation")
+    print(format_table(summary, policies, extended=extended))
     write_summary(args.out, summary)
     print(f"\nwrote {args.out}")
 
