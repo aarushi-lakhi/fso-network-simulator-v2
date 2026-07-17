@@ -1,7 +1,7 @@
 # FSO Network Simulator — Project Plan
 
 > **Living document.** Update this file as phases complete, decisions change, or scope shifts.
-> Last updated: 2026-07-03
+> Last updated: 2026-07-17 — all phases complete; see the tracker and `README.md`
 
 ---
 
@@ -24,57 +24,49 @@ modeling (GNU Radio) with network-layer adaptive routing (ns-3 + Deep Reinforcem
 
 ---
 
-## Repository Structure (target)
+## Repository Structure (actual, as shipped)
 
 ```
-fso-network-simulator/
+fso-network-simulator-v2/
 ├── plan.md                        ← this file
-├── .gitignore
-├── README.md
+├── handoff.md                     # session/machine continuity notes
+├── README.md                      # architecture, results, reproduction
+├── LICENSE                        # GPL-2.0
+├── .github/workflows/ci.yml      # hermetic tests + ruff on every PR
 │
-├── prototype/                     # Phase 2 — pure Python math validation
-│   ├── gamma_gamma.py             # Gamma-Gamma RNG + PDF implementation
-│   ├── turbulence_plots.py        # visualization: fading traces, BER curves
-│   ├── requirements.txt
-│   └── tests/
-│       └── test_gamma_gamma.py
+├── prototype/                     # Phase 2a/6a — pure Python math validation
+│   ├── gamma_gamma.py             # Gamma-Gamma model + correlated (copula AR(1)) sampler
+│   ├── turbulence_plots.py        # fading traces, BER, scintillation, correlation plots
+│   ├── plots/                     # committed publication plots
+│   └── tests/                     # 64 tests (39 core + 25 correlated)
 │
-├── gr-fso-turbulence/             # Phase 2 — GNU Radio OOT module
-│   ├── CMakeLists.txt
-│   ├── python/
-│   │   └── fso_turbulence/
-│   │       └── fso_fading_channel.py
-│   ├── grc/
-│   │   └── fso_turbulence_fso_fading_channel.block.yml
-│   └── examples/
-│       └── fso_fading_demo.grc    # GRC flowgraph: tone → fading → oscilloscope
+├── gr-fso-turbulence/             # Phase 2b — GNU Radio OOT module
+│   ├── python/fso_turbulence/     # fso_fading_channel block + QA tests
+│   ├── grc/                       # GRC block definition
+│   └── examples/fso_fading_demo.grc
 │
-├── ns3-fso-channel/               # Phase 3 — custom ns-3 propagation model
-│   ├── model/
-│   │   ├── gamma-gamma-fso-loss-model.h
-│   │   └── gamma-gamma-fso-loss-model.cc
-│   ├── helper/
-│   │   └── fso-topology-helper.h/.cc
-│   └── examples/
-│       └── fso-5node-mesh.cc
+├── ns3-fso-channel/               # Phase 3/6b — custom ns-3 contrib module
+│   ├── model/                     # GammaGammaFsoLossModel + CorrelatedGammaGammaFading
+│   ├── helper/                    # FsoTopologyHelper (fading → p2p error-rate bridge)
+│   ├── test/                      # two ns-3 test suites
+│   └── examples/fso-5node-mesh.cc
 │
-├── ns3-rl-router/                 # Phase 4 — DRL routing agent
-│   ├── sim/
-│   │   └── fso-rl-env.cc          # ns-3 simulation + ns3-ai interface
-│   ├── agent/
-│   │   ├── ppo_agent.py
-│   │   ├── network.py             # Actor-Critic neural net
-│   │   └── train.py
-│   ├── config/
-│   │   └── sim_config.yaml
+├── ns3-rl-router/                 # Phase 4/7 — DRL routing agent
+│   ├── sim/                       # fso-rl-env.cc (ns3-ai Gym env), check_env, shims
+│   ├── agent/                     # PPO, actor-critic, frame stack, train/eval, 36 tests
+│   ├── config/sim_config.yaml
 │   └── requirements.txt
 │
-└── benchmarks/                    # Phase 5 — results and comparison
-    ├── run_benchmark.py
-    ├── parse_traces.py
-    ├── plot_results.py
-    └── results/                   # .gitignore'd large trace files; plots committed
-        └── .gitkeep
+├── benchmarks/                    # Phases 5/6c/7c — studies and results
+│   ├── run_benchmark.py           # orchestrator (--study turbulence|correlated|adaptation)
+│   ├── parse_traces.py / plot_results.py
+│   ├── aodv/fso-aodv-baseline.cc  # classical-routing baseline scenario
+│   ├── tests/                     # hermetic parsing tests
+│   └── results/                   # committed CSVs, plots, findings README
+│
+└── setup/                         # Phase 1 — macOS toolchain scripts
+    ├── install_{gnuradio,ns3,ns3_ai}.sh, link_fso_modules.sh, verify_env.sh
+    └── patches/                   # ns-3.40 libc++ compat patch
 ```
 
 ---
@@ -329,7 +321,7 @@ Thumbs.db
 | 6a — Correlated sampler (math) | `math/correlated-fading-sampler` | ✅ Complete | Merged via PR #16 (2026-07-07); SI identity holds on correlated chains within 1% |
 | 6b — ns-3 correlated fading | `feat/correlated-fso-fading` | ✅ Complete | Merged via PR #17 (2026-07-07); τ=0 bit-identical to i.i.d., 9/9 tests |
 | 6c — Correlated-fading study | `feat/correlated-fading-study` | ✅ Complete | Answer: no — memory is necessary but not sufficient. PPO stays constant-route even at τ=500 ms / 50 ms steps; PER observation fixed route *selection*, not switching. Analysis in `benchmarks/results/README.md` |
-| CI | `chore/github-actions-ci` | 🔄 In progress | GitHub Actions: hermetic tests (prototype/agent/benchmarks) + ruff on every PR |
+| CI | `chore/github-actions-ci` | ✅ Complete | Merged via PR #20 (2026-07-16); hermetic tests + ruff run on every PR, badge on the README |
 | 7a — Adaptation-friendly environment | `feat/disjoint-routes-tcp` | ✅ Complete | Merged via PR #22 (2026-07-16); probe confirmed the per-episode best route flips on the disjoint mesh |
 | 7b — Policy memory | `feat/frame-stacked-obs` | ✅ Complete | Folded into 7c: `FlatFrameStack` wrapper (8 frames, 7 tests) — collapsed to constant-route exactly like plain PPO |
 | 7c — Adaptation study | `feat/adaptation-study` | ✅ Complete | Verdict: adaptation is now provably profitable (scripted greedy-PER beats best-static 8/10 in both correlated cells) and PPO still can't find it — collapses to constant routes, entropy ≈0.005 nats. Bottleneck moved from environment to optimizer. Analysis in `benchmarks/results/README.md` |
