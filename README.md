@@ -85,8 +85,15 @@ episodes in both correlated cells (+13.8 pp PDR under UDP, +75% goodput under TC
 PPO — even frame-stacked at double budget — still collapses to a constant route with
 near-zero policy entropy. The bottleneck is no longer the environment; it's the
 optimizer: on-policy PPO under episode-return noise of ~25% of the mean retreats to
-the safest constant action. Full paired analysis, switching statistics, and the
-oracle gap in [`benchmarks/results/README.md`](benchmarks/results/README.md).
+the safest constant action.
+
+**Phase 8 proved it.** Behavior-cloning the scripted rule hands PPO a working
+switching policy with a properly warmed-up critic — and fine-tuning *destroys* it in
+both correlated cells, walking entropy from 0.65 to 0.005 nats and switches from 80
+to 0 per episode (under TCP, from an initialization that already beat every static
+route). Exploration is ruled out; the on-policy gradient itself is the failure mode.
+Full paired analysis, switching statistics, and the collapse-trajectory plot in
+[`benchmarks/results/README.md`](benchmarks/results/README.md).
 
 ## Repository layout
 

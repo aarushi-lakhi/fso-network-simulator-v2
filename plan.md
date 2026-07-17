@@ -325,7 +325,7 @@ Thumbs.db
 | 7a — Adaptation-friendly environment | `feat/disjoint-routes-tcp` | ✅ Complete | Merged via PR #22 (2026-07-16); probe confirmed the per-episode best route flips on the disjoint mesh |
 | 7b — Policy memory | `feat/frame-stacked-obs` | ✅ Complete | Folded into 7c: `FlatFrameStack` wrapper (8 frames, 7 tests) — collapsed to constant-route exactly like plain PPO |
 | 7c — Adaptation study | `feat/adaptation-study` | ✅ Complete | Verdict: adaptation is now provably profitable (scripted greedy-PER beats best-static 8/10 in both correlated cells) and PPO still can't find it — collapses to constant routes, entropy ≈0.005 nats. Bottleneck moved from environment to optimizer. Analysis in `benchmarks/results/README.md` |
-| 8 — Imitation-then-RL | `feat/imitation-study` | 🔄 In progress | BC-clone the greedy-PER teacher, then PPO fine-tune: does the on-policy gradient *preserve* a switching policy it didn't have to discover, or degrade it back to constant-route? |
+| 8 — Imitation-then-RL | `feat/imitation-study` | ✅ Complete | Verdict: PPO **destroys** the cloned switching policy in both correlated cells (UDP: collapses to constant route 0, byte-identical all seeds; TCP: BC started *better* than best-static and fine-tuning walked it below its own init). Exploration ruled out — the on-policy gradient under this return variance is the bottleneck. Bonus finding: a stateless clone matches the teacher's fade-dodging exactly but not its hysteresis (the held route isn't observable). Trajectory + analysis in `benchmarks/results/README.md` |
 
 **Status legend:** 🔲 Not started · 🔄 In progress · ✅ Complete · ⏸ Blocked
 
