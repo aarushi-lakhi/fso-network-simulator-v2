@@ -72,6 +72,13 @@ class TrainConfig:
             [s], e.g. "0.05".
         episode_steps: Decision steps per episode override for the
             ns3 env.
+        topology: Mesh layout override for the ns3 env ("pentagon" or
+            "disjoint", see sim/README.md).
+        traffic_protocol: Transport override for the ns3 env's 0->3
+            flow ("udp" or "tcp").
+        frame_stack: Stack the last N observations into one flat
+            observation (FlatFrameStack; 1 = no stacking). Applies to
+            both env backends.
         rewards_csv: Where to write per-episode rewards as CSV. None
             disables.
     """
@@ -100,6 +107,9 @@ class TrainConfig:
     coherence_small: str | None = None
     step_time_s: str | None = None
     episode_steps: int | None = None
+    topology: str | None = None
+    traffic_protocol: str | None = None
+    frame_stack: int = 1
     rewards_csv: str | None = None
 
     def ppo_config(self) -> PPOConfig:
@@ -291,6 +301,14 @@ def parse_args(argv: list[str] | None = None) -> TrainConfig:
                         help="decision interval [s] for --env ns3, e.g. 0.05")
     parser.add_argument("--episode-steps", type=int, default=None,
                         help="decision steps per episode for --env ns3")
+    parser.add_argument("--topology", type=str, default=None,
+                        choices=("pentagon", "disjoint"),
+                        help="mesh layout for --env ns3")
+    parser.add_argument("--traffic-protocol", type=str, default=None,
+                        choices=("udp", "tcp"), dest="traffic_protocol",
+                        help="transport of the 0->3 flow for --env ns3")
+    parser.add_argument("--frame-stack", type=int, default=None,
+                        help="stack the last N observations (1 = off)")
     parser.add_argument("--rewards-csv", type=str, default=None,
                         help="write per-episode rewards to this CSV file")
     args = parser.parse_args(argv)
@@ -313,6 +331,9 @@ def parse_args(argv: list[str] | None = None) -> TrainConfig:
         "coherence_small",
         "step_time_s",
         "episode_steps",
+        "topology",
+        "traffic_protocol",
+        "frame_stack",
         "rewards_csv",
     ):
         value = getattr(args, name)
@@ -335,26 +356,37 @@ def resolve_env_factory(config: TrainConfig) -> EnvFactory:
         Zero-argument factory producing the training environment.
     """
     if config.env == "toy":
-        return ToyFsoRoutingEnv
-    if config.env != "ns3":
+        base_factory: EnvFactory = ToyFsoRoutingEnv
+    elif config.env != "ns3":
         raise ValueError(f"unknown env backend: {config.env!r}")
+    else:
+        from ns3_env import DEFAULT_CONFIG_PATH, make_ns3_env
 
-    from ns3_env import DEFAULT_CONFIG_PATH, make_ns3_env
+        for name in ("log_dir", "checkpoint_path", "rewards_csv"):
+            value = getattr(config, name)
+            if value is not None:
+                setattr(config, name, str(Path(value).resolve()))
+        sim_config = str(Path(config.sim_config or DEFAULT_CONFIG_PATH).resolve())
 
-    for name in ("log_dir", "checkpoint_path", "rewards_csv"):
-        value = getattr(config, name)
-        if value is not None:
-            setattr(config, name, str(Path(value).resolve()))
-    sim_config = str(Path(config.sim_config or DEFAULT_CONFIG_PATH).resolve())
-    return lambda: make_ns3_env(
-        sim_config,
-        c2n=config.c2n,
-        seed=config.seed,
-        coherence_large=config.coherence_large,
-        coherence_small=config.coherence_small,
-        step_time_s=config.step_time_s,
-        episode_steps=config.episode_steps,
-    )
+        def base_factory() -> gym.Env:
+            return make_ns3_env(
+                sim_config,
+                c2n=config.c2n,
+                seed=config.seed,
+                coherence_large=config.coherence_large,
+                coherence_small=config.coherence_small,
+                step_time_s=config.step_time_s,
+                episode_steps=config.episode_steps,
+                topology=config.topology,
+                traffic_protocol=config.traffic_protocol,
+            )
+
+    if config.frame_stack <= 1:
+        return base_factory
+
+    from frame_stack import FlatFrameStack
+
+    return lambda: FlatFrameStack(base_factory(), config.frame_stack)
 
 
 def main() -> None:
