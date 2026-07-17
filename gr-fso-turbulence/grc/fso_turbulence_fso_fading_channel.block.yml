@@ -10,7 +10,10 @@ templates:
         wavelength=${wavelength},
         distance=${distance},
         coherence_samples=${coherence_samples},
-        seed=${seed})
+        seed=${seed},
+        tau_large=${tau_large},
+        tau_small=${tau_small},
+        sample_rate=${sample_rate})
 
 parameters:
 - id: C2n
@@ -33,6 +36,18 @@ parameters:
   label: Seed
   dtype: raw
   default: None
+- id: tau_large
+  label: 'Tau Large-Scale [s]'
+  dtype: real
+  default: '0.0'
+- id: tau_small
+  label: 'Tau Small-Scale [s]'
+  dtype: real
+  default: '0.0'
+- id: sample_rate
+  label: 'Sample Rate [Hz]'
+  dtype: real
+  default: samp_rate
 
 inputs:
 - label: in
@@ -56,6 +71,14 @@ documentation: |-
   Each fading coefficient is held for 'Coherence Samples' consecutive
   samples to model the turbulence coherence time (turbulence ~kHz vs.
   sample rates ~MHz). Set it to sample_rate x coherence_time.
+
+  Non-zero Tau Large-Scale / Tau Small-Scale correlate successive
+  coefficients via a Gaussian copula AR(1) per Gamma component,
+  preserving the exact Gamma-Gamma marginal. One AR(1) step happens
+  per coherence window, so rho = exp(-dt/tau) with
+  dt = coherence_samples / sample_rate. Tau = 0 (default) draws that
+  component i.i.d. per window, the pre-Phase-6 behaviour. Physically
+  tau_large > tau_small (large refractive eddies evolve more slowly).
 
   C2n regimes: 1e-17 (weak), 1e-15 (moderate), 1e-13 (strong).
 
