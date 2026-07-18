@@ -246,6 +246,37 @@ class TestBcLoading:
             agent.load_bc_policy(path)
 
 
+class TestRouteAwareObsDims:
+    """Loader behaviour across the Phase 10 obs change (28 -> 32 dims)."""
+
+    PLAIN, AWARE = 28, 32
+
+    def test_route_aware_checkpoint_round_trips(self, tmp_path):
+        path = tmp_path / "bc_route.pt"
+        PPOAgent(self.AWARE, N_ACTIONS).save(path)
+        agent = PPOAgent(self.AWARE, N_ACTIONS)
+        agent.load(path)
+        dqn = DQNAgent(self.AWARE, N_ACTIONS)
+        dqn.load_bc_policy(path, q_offset=-300.0)
+        assert dqn.network.obs_dim == self.AWARE
+
+    def test_plain_checkpoint_rejected_by_route_aware_agents(self, tmp_path):
+        path = tmp_path / "bc.pt"
+        PPOAgent(self.PLAIN, N_ACTIONS).save(path)
+        with pytest.raises(ValueError, match="do not match"):
+            PPOAgent(self.AWARE, N_ACTIONS).load(path)
+        with pytest.raises(ValueError, match="do not match"):
+            DQNAgent(self.AWARE, N_ACTIONS).load_bc_policy(path)
+
+    def test_route_aware_checkpoint_rejected_by_plain_agents(self, tmp_path):
+        path = tmp_path / "bc_route.pt"
+        PPOAgent(self.AWARE, N_ACTIONS).save(path)
+        with pytest.raises(ValueError, match="do not match"):
+            PPOAgent(self.PLAIN, N_ACTIONS).load(path)
+        with pytest.raises(ValueError, match="do not match"):
+            DQNAgent(self.PLAIN, N_ACTIONS).load_bc_policy(path)
+
+
 class TestQGaps:
     def test_known_network_gap(self):
         net = QNetwork(2, 3, hidden_sizes=())

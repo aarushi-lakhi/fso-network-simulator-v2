@@ -340,14 +340,24 @@ def _make_env(args: argparse.Namespace):
                         step_time_s=args.step_time,
                         episode_steps=args.episode_steps,
                         topology=args.topology,
-                        traffic_protocol=args.traffic_protocol)
+                        traffic_protocol=args.traffic_protocol,
+                        route_in_obs=args.route_in_obs)
 
 
 def run_collect(args: argparse.Namespace) -> None:
-    """Roll the teacher on training seeds and save the BC dataset."""
-    from teacher import DEFAULT_MARGIN, GreedyPerTeacher, route_links_for
+    """Roll the teacher on training seeds and save the BC dataset.
+
+    In route-aware mode (``--route-in-obs true``) every step additionally
+    asserts that the env's route one-hot equals the teacher's held route:
+    the teacher drives the env, so the one-hot IS the teacher's hysteresis
+    state, and the check makes that alignment explicit before training.
+    """
+    from teacher import (DEFAULT_MARGIN, GreedyPerTeacher,
+                         held_route_from_obs, route_links_for)
 
     env = _make_env(args)
+    route_aware = args.route_in_obs == "true"
+    aligned_steps = 0
     route_links = route_links_for(args.topology or "pentagon")
     all_obs: list[np.ndarray] = []
     all_actions: list[int] = []
@@ -361,6 +371,13 @@ def run_collect(args: argparse.Namespace) -> None:
             obs = np.asarray(obs, dtype=np.float32)
             reward_total, switches, route, done = 0.0, 0, 0, False
             while not done:
+                if route_aware:
+                    held = held_route_from_obs(obs, len(route_links))
+                    if held != teacher.current:
+                        raise RuntimeError(
+                            f"route one-hot {held} != teacher held route "
+                            f"{teacher.current} (ep {ep})")
+                    aligned_steps += 1
                 action = teacher.act(obs)
                 all_obs.append(obs)
                 all_actions.append(action)
@@ -395,6 +412,9 @@ def run_collect(args: argparse.Namespace) -> None:
     print(f"[collect] teacher reward {np.mean(episode_rewards):.1f} +/- "
           f"{np.std(episode_rewards):.1f}, switches/ep "
           f"{np.mean(episode_switches):.1f}")
+    if route_aware:
+        print(f"[collect] route-onehot/teacher alignment verified on all "
+              f"{aligned_steps} steps")
 
 
 def run_bc(args: argparse.Namespace) -> None:
@@ -564,6 +584,10 @@ def _add_env_args(parser: argparse.ArgumentParser) -> None:
                         choices=("pentagon", "disjoint"))
     parser.add_argument("--traffic-protocol", type=str, default=None,
                         choices=("udp", "tcp"), dest="traffic_protocol")
+    parser.add_argument("--route-in-obs", type=str, default=None,
+                        choices=("true", "false"), dest="route_in_obs",
+                        help="append a current-route one-hot to the env "
+                             "observation (obs 28 -> 32; Phase 10)")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
