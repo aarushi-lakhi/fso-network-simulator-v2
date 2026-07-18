@@ -13,11 +13,17 @@ prefixed ``adaptation_``, plus a route-switches chart);
 results/imitation_summary.csv (prefix ``imitation_``, headline policies
 only) plus the fine-tuning trajectory chart — entropy, KL from the BC
 policy, and switch rate per update — from
-results/imitation_trajectory_<regime>.csv. Styling follows
+results/imitation_trajectory_<regime>.csv;
+``--study offpolicy`` plots the Phase 9 study from
+results/offpolicy_summary.csv (prefix ``offpolicy_``) plus its own
+trajectory chart — greedy switch rate, Q-gap, and TD loss per update
+for all four DQN runs — from
+results/offpolicy_trajectory_<arm>_<regime>.csv. Styling follows
 prototype/turbulence_plots.py; the categorical palette is
 Okabe-Ito-derived and colorblind-validated (adjacent-pair CVD
 deltaE >= 12; the Phase 8 additions bc/bc-ppo were validated all-pairs
-against every co-plotted policy color).
+against every co-plotted policy color; the Phase 9 additions
+dqn-scratch/dqn-bc use Paul Tol's colorblind-safe indigo and sand).
 
 Typical usage:
     $ python plot_results.py
@@ -72,6 +78,8 @@ POLICY_COLORS = {
     "ppo-stack": "#000000",
     "bc": "#AA4499",
     "bc-ppo": "#E07126",
+    "dqn-scratch": "#332288",
+    "dqn-bc": "#DDCC77",
     "ppo-transfer": "#56B4E9",
     "best-static": "#009E73",
     "greedy-per": "#999999",
@@ -86,6 +94,8 @@ POLICY_LABELS = {
     "ppo-stack": "PPO (8-frame stack, 160k)",
     "bc": "BC of greedy-PER teacher",
     "bc-ppo": "BC + PPO fine-tune",
+    "dqn-scratch": "Double DQN (scratch)",
+    "dqn-bc": "Double DQN (BC-init)",
     "ppo-transfer": "PPO (1e-13 ckpt)",
     "best-static": "Best static route",
     "greedy-per": "Greedy PER (scripted)",
@@ -106,6 +116,24 @@ IMITATION_POLICIES = ("ppo", "bc", "bc-ppo", "best-static", "greedy-per")
 TRAJECTORY_STYLES = {
     "disjoint-tau500-udp": ("#0072B2", "-", "τ 500/100 ms + UDP"),
     "disjoint-tau500-tcp": ("#D55E00", "--", "τ 500/100 ms + TCP"),
+}
+
+# Phase 9 off-policy study: same two cells; the four DQN training runs
+# are encoded as color = cell (matching TRAJECTORY_STYLES), line style
+# = arm (solid scratch, dashed BC-init).
+OFFPOLICY_ORDER = IMITATION_ORDER
+OFFPOLICY_POLICIES = ("ppo", "bc", "bc-ppo", "dqn-scratch", "dqn-bc",
+                      "best-static", "greedy-per")
+OFFPOLICY_ARMS = ("dqn-scratch", "dqn-bc")
+OFFPOLICY_TRAJECTORY_STYLES = {
+    ("dqn-scratch", "disjoint-tau500-udp"):
+        ("#0072B2", "-", "UDP, scratch"),
+    ("dqn-bc", "disjoint-tau500-udp"):
+        ("#0072B2", "--", "UDP, BC-init"),
+    ("dqn-scratch", "disjoint-tau500-tcp"):
+        ("#D55E00", "-", "TCP, scratch"),
+    ("dqn-bc", "disjoint-tau500-tcp"):
+        ("#D55E00", "--", "TCP, BC-init"),
 }
 
 METRIC_SPECS = (
@@ -254,7 +282,8 @@ def load_trajectory(path: str | Path) -> dict[str, list]:
     """
     numeric = ("update", "global_step", "entropy", "value_loss", "policy_loss",
                "approx_kl", "kl_from_bc", "sampled_switches_per_200",
-               "greedy_switches_per_200", "mean_episode_reward")
+               "greedy_switches_per_200", "mean_episode_reward",
+               "epsilon", "td_loss", "mean_q_gap", "max_q_gap")
     columns: dict[str, list] = {}
     with open(path, newline="", encoding="utf-8") as fp:
         for row in csv.DictReader(fp):
@@ -345,11 +374,73 @@ def plot_imitation_trajectory(
     return fig
 
 
+def plot_offpolicy_trajectory(
+    trajectories: dict[tuple[str, str], dict[str, list]],
+    filename: str = "offpolicy_trajectory.png",
+    save: bool = True,
+) -> plt.Figure:
+    """Render the Phase 9 DQN training trajectory (the study's result).
+
+    Three stacked panels over training updates (500 env steps each):
+    the greedy policy's switch rate (per 200-step episode), the mean
+    Q-gap between the best and second-best action, and the TD (Huber)
+    loss on a log scale. One line per (arm, cell) training run; a
+    reference line marks the teacher's eval switch rate.
+
+    Args:
+        trajectories: Mapping of (arm, regime) to trajectory columns
+            (from :func:`load_trajectory`).
+        filename: Output file name under results/plots/.
+        save: If True, save the PNG.
+
+    Returns:
+        The matplotlib Figure.
+    """
+    _apply_base_style()
+    fig, axes = plt.subplots(3, 1, figsize=(9, 9), sharex=True)
+    ax_switch, ax_gap, ax_td = axes
+
+    for key, cols in trajectories.items():
+        color, linestyle, label = OFFPOLICY_TRAJECTORY_STYLES.get(
+            key, ("#0072B2", "-", f"{key[0]} {key[1]}"))
+        updates = np.asarray(cols["update"], dtype=float)
+        ax_switch.plot(updates, cols["greedy_switches_per_200"], color=color,
+                       linestyle=linestyle, lw=2, label=label)
+        ax_gap.plot(updates, cols["mean_q_gap"], color=color,
+                    linestyle=linestyle, lw=2, label=label)
+        ax_td.plot(updates, cols["td_loss"], color=color,
+                   linestyle=linestyle, lw=2, label=label)
+
+    ax_switch.axhline(46.0, color="#666666", lw=1, linestyle=":")
+    ax_switch.annotate("teacher (46/ep)", xy=(0.99, 46.0),
+                       xycoords=("axes fraction", "data"),
+                       ha="right", va="bottom", fontsize=9, color="#666666")
+
+    ax_switch.set_ylabel("Greedy switches / 200 steps")
+    ax_gap.set_ylabel("Mean Q-gap (best − 2nd) ")
+    ax_td.set_ylabel("TD loss (Huber)")
+    ax_td.set_yscale("log")
+    ax_td.set_xlabel("Update (500 env steps each)")
+    for ax in axes:
+        ax.legend(loc="best", framealpha=0.85, ncols=2)
+    ax_switch.set_title("Double DQN training on the correlated cells — "
+                        "does off-policy learning find/keep switching?")
+    fig.tight_layout()
+
+    if save:
+        PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+        out = PLOTS_DIR / filename
+        fig.savefig(out, bbox_inches="tight")
+        print(f"[saved] {out}")
+    return fig
+
+
 def main() -> None:
     """CLI entry point: render all four benchmark charts."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--study", choices=("turbulence", "correlated",
-                                            "adaptation", "imitation"),
+                                            "adaptation", "imitation",
+                                            "offpolicy"),
                         default="turbulence",
                         help="picks the default summary file, x-axis, and "
                              "output file prefix")
@@ -360,9 +451,28 @@ def main() -> None:
     defaults = {"turbulence": "summary.csv",
                 "correlated": "correlated_summary.csv",
                 "adaptation": "adaptation_summary.csv",
-                "imitation": "imitation_summary.csv"}
+                "imitation": "imitation_summary.csv",
+                "offpolicy": "offpolicy_summary.csv"}
     table = load_summary(args.summary or str(RESULTS_DIR / defaults[args.study]))
-    if args.study == "imitation":
+    if args.study == "offpolicy":
+        for metric, title, ylabel, filename in (*METRIC_SPECS,
+                                                *ADAPTATION_EXTRA_SPECS):
+            plot_metric(table, metric, title, ylabel, f"offpolicy_{filename}",
+                        x_order=OFFPOLICY_ORDER, x_labels=ADAPTATION_LABELS,
+                        x_axis_label="Environment config (disjoint topology, "
+                                     "C²ₙ = 1e-13 m⁻²ᐟ³)",
+                        subtitle="10 episodes, shared seeds",
+                        policies=OFFPOLICY_POLICIES)
+        trajectories = {
+            (arm, regime): load_trajectory(path)
+            for arm in OFFPOLICY_ARMS
+            for regime in OFFPOLICY_ORDER
+            if (path := RESULTS_DIR /
+                f"offpolicy_trajectory_{arm}_{regime}.csv").exists()
+        }
+        if trajectories:
+            plot_offpolicy_trajectory(trajectories)
+    elif args.study == "imitation":
         for metric, title, ylabel, filename in (*METRIC_SPECS,
                                                 *ADAPTATION_EXTRA_SPECS):
             plot_metric(table, metric, title, ylabel, f"imitation_{filename}",

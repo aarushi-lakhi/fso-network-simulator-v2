@@ -21,12 +21,20 @@ settings, so they are directly comparable and are not re-run). Its
 ``--paired`` mode compares bc, bc-ppo, and greedy-per against
 best-static, plus bc-ppo against bc (the fine-tuning delta itself).
 
+``--study offpolicy`` (Phase 9) reads offpolicy_raw.csv and merges in
+both committed reference CSVs (adaptation_raw.csv for ppo / statics /
+greedy-per, imitation_raw.csv for bc / bc-ppo) so the full
+{PPO, DQN} x {scratch, BC-init} 2x2 sits in one table. Its ``--paired``
+mode compares dqn-scratch and dqn-bc against best-static, plus both
+against bc (did the DQN keep the cloned switching policy?).
+
 Typical usage:
     $ python parse_traces.py                      # Phase 5 raw_results.csv
     $ python parse_traces.py --study correlated   # Phase 6 correlated_raw.csv
     $ python parse_traces.py --study adaptation   # Phase 7 adaptation_raw.csv
     $ python parse_traces.py --study adaptation --paired
     $ python parse_traces.py --study imitation [--paired]
+    $ python parse_traces.py --study offpolicy [--paired]
     $ python parse_traces.py --raw path/to/raw.csv --out path/to/summary.csv
 """
 
@@ -46,7 +54,7 @@ REGIME_ORDER = ("weak", "moderate", "strong", "iid", "tau100-20", "tau500-100",
                 "tau500-100-step50", "disjoint-iid-udp", "disjoint-tau500-udp",
                 "disjoint-tau500-tcp")
 POLICY_ORDER = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "bc", "bc-ppo",
-                "ppo-transfer",
+                "dqn-scratch", "dqn-bc", "ppo-transfer",
                 "best-static", "static-0", "static-1", "static-2", "static-3",
                 "greedy-per", "random", "aodv")
 
@@ -61,8 +69,8 @@ SUMMARY_FIELDS = ("regime", "policy", "detail", "n_episodes",
 # Policies shown in the printed table and the plots; individual static
 # routes stay in summary.csv for reference.
 HEADLINE_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "bc",
-                     "bc-ppo", "ppo-transfer", "best-static", "greedy-per",
-                     "random", "aodv")
+                     "bc-ppo", "dqn-scratch", "dqn-bc", "ppo-transfer",
+                     "best-static", "greedy-per", "random", "aodv")
 
 
 def load_raw(path: str | Path) -> list[dict]:
@@ -422,7 +430,8 @@ def main() -> None:
     """CLI entry point: aggregate the raw CSV and print the table."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--study", choices=("turbulence", "correlated",
-                                            "adaptation", "imitation"),
+                                            "adaptation", "imitation",
+                                            "offpolicy"),
                         default="turbulence",
                         help="picks the default --raw/--out file pair")
     parser.add_argument("--raw", type=str, default=None,
@@ -438,14 +447,17 @@ def main() -> None:
     stems = {"turbulence": ("raw_results", "summary"),
              "correlated": ("correlated_raw", "correlated_summary"),
              "adaptation": ("adaptation_raw", "adaptation_summary"),
-             "imitation": ("imitation_raw", "imitation_summary")}
+             "imitation": ("imitation_raw", "imitation_summary"),
+             "offpolicy": ("offpolicy_raw", "offpolicy_summary")}
     stem, out_stem = stems[args.study]
     args.raw = args.raw or str(RESULTS_DIR / f"{stem}.csv")
     args.out = args.out or str(RESULTS_DIR / f"{out_stem}.csv")
 
+    references = {"imitation": ("adaptation_raw",),
+                  "offpolicy": ("adaptation_raw", "imitation_raw")}
     rows = load_raw(args.raw)
-    if args.study == "imitation":
-        reference_csv = RESULTS_DIR / "adaptation_raw.csv"
+    for reference in references.get(args.study, ()):
+        reference_csv = RESULTS_DIR / f"{reference}.csv"
         if reference_csv.exists():
             rows = merge_reference_rows(rows, load_raw(reference_csv))
     if args.paired:
@@ -456,12 +468,21 @@ def main() -> None:
                 print()
             print(format_paired_policies(paired_policies(rows, "bc-ppo", "bc"),
                                          "bc-ppo", "bc"))
+        elif args.study == "offpolicy":
+            for policy in ("dqn-scratch", "dqn-bc"):
+                print(format_paired(paired_ppo_vs_best_static(rows, policy),
+                                    policy))
+                print()
+            for policy in ("dqn-scratch", "dqn-bc"):
+                print(format_paired_policies(paired_policies(rows, policy, "bc"),
+                                             policy, "bc"))
+                print()
         else:
             print(format_paired(paired_ppo_vs_best_static(rows)))
         return
     summary = summarize(rows)
     policies = POLICY_ORDER if args.all_policies else HEADLINE_POLICIES
-    extended = args.study in ("adaptation", "imitation")
+    extended = args.study in ("adaptation", "imitation", "offpolicy")
     print(format_table(summary, policies, extended=extended))
     write_summary(args.out, summary)
     print(f"\nwrote {args.out}")
