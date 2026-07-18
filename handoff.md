@@ -5,8 +5,8 @@
 > `README.md` (architecture, results, reproduction). This file carries only what those
 > two don't: working style, environment quirks, and the open threads.
 >
-> Last updated: 2026-07-17 — **all seven phases complete**, `main` == `dev` at the
-> phase 7 release (PR #24).
+> Last updated: 2026-07-18 — **all ten phases complete**, `main` == `dev` at the
+> phase 10 release (PR #35). For the full history, read `RETROSPECTIVE.md`.
 
 ---
 
@@ -14,13 +14,15 @@
 
 The simulator is finished and self-documenting: Gamma-Gamma turbulence math validated in
 Python (`prototype/`), mirrored into a GNU Radio fading block (`gr-fso-turbulence/`) and
-a custom ns-3 channel module (`ns3-fso-channel/`, including Phase 6's correlated-fading
-process), bridged to a PyTorch PPO agent through ns3-ai (`ns3-rl-router/`), and
-benchmarked across three studies (`benchmarks/results/README.md`). The scientific arc
-ended with a sharp negative result: adaptation is provably profitable in the Phase 7
-environment (a scripted greedy-PER rule beats the best static route 8/10 episodes) and
-PPO still collapses to constant-route policies — the bottleneck is the optimizer, not
-the environment.
+a custom ns-3 channel module (`ns3-fso-channel/`) — all three layers including the
+correlated (copula AR(1)) fading model — bridged to PyTorch agents through ns3-ai
+(`ns3-rl-router/`: PPO, Double DQN, behavior cloning, a scripted greedy-PER teacher),
+and benchmarked across six shared-seed studies (`benchmarks/results/README.md`). The
+research arc *resolved*: after PPO merely tied the best static route (phase 5), five
+controlled studies cornered the cause through environment (6), optimizer (7–8), and
+optimizer family (9) to the observation itself (10) — appending the held route to the
+observation let a behavior-cloned policy match the scripted teacher and beat the best
+static route significantly, the program's confirmed-hypothesis ending.
 
 ## Working Style (unchanged — follow strictly)
 
@@ -54,10 +56,17 @@ the environment.
 
 ## Open Threads (a new chapter, not unfinished business)
 
-1. **Why does on-policy PPO collapse to constant routes under ~25% return noise, and
-   what fixes it?** Cheap experiments with the existing harness: advantage/reward
-   normalization variants; behavior-cloning the scripted greedy-PER teacher then
-   fine-tuning with PPO; off-policy methods (DQN/SAC-discrete). Each is a small
-   `agent/` branch plus one `--study` cell.
-2. PHY-in-the-loop: wire the GNU Radio block's output into the ns-3 channel for true
-   cross-layer simulation (currently the layers share parameters, not samples).
+The big question — why RL collapsed and what fixes it — was ANSWERED by phases 8–10
+(see `RETROSPECTIVE.md`): the winning recipe is route-aware observations + imitation
+from the greedy-PER teacher, optionally DQN-fine-tuned. What remains open:
+
+1. **TCP's return noise defeats every optimizer tried** (PPO's entropy collapse and
+   DQN's TD-erasure both persist even with route-aware observations). Untested levers:
+   variance reduction via a "weather luck" baseline, distributional RL, larger batch /
+   multi-episode returns.
+2. **Nothing finds switching from scratch** — exploration is a wall independent of
+   retention. Untested: intrinsic motivation, scheduled teacher mixing (DAgger-style).
+3. **PHY-in-the-loop**: wire the GNU Radio block's output into the ns-3 channel for
+   true cross-layer simulation (currently the layers share parameters, not samples).
+
+Each is an afternoon-sized experiment with the existing `--study` harness.
