@@ -30,8 +30,10 @@ deltaE >= 12; the Phase 8 additions bc/bc-ppo were validated all-pairs
 against every co-plotted policy color; the Phase 9 additions
 dqn-scratch/dqn-bc use Paul Tol's colorblind-safe indigo and sand; the
 Phase 10 route-aware arms reuse their 28-dim counterpart's hue family
-at a clearly darker/lighter value, so arm identity is the hue and
-observability is the lightness).
+at a clearly darker/lighter value where the warm axis allows —
+dqn-bc-route takes a dark slate cyan instead, the warm hues being
+exhausted — validated all-pairs at simulated-CVD deltaE >= 12.5
+against every co-plotted color).
 
 Typical usage:
     $ python plot_results.py
@@ -91,7 +93,7 @@ POLICY_COLORS = {
     "bc-route": "#5C1237",
     "bc-ppo-route": "#8C3A0F",
     "dqn-scratch-route": "#9C93E8",
-    "dqn-bc-route": "#8A6D00",
+    "dqn-bc-route": "#14505C",
     "ppo-transfer": "#56B4E9",
     "best-static": "#009E73",
     "greedy-per": "#999999",
