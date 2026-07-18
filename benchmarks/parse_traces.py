@@ -28,6 +28,13 @@ greedy-per, imitation_raw.csv for bc / bc-ppo) so the full
 mode compares dqn-scratch and dqn-bc against best-static, plus both
 against bc (did the DQN keep the cloned switching policy?).
 
+``--study routeaware`` (Phase 10) reads routeaware_raw.csv and merges
+in all three committed reference CSVs so every route-aware arm sits
+next to its 28-dim counterpart and the baselines. Its ``--paired``
+mode compares each route-aware arm against best-static, bc-route
+against the teacher (greedy-per, the BC-fidelity check), and each arm
+against its 28-dim counterpart (the observability delta).
+
 Typical usage:
     $ python parse_traces.py                      # Phase 5 raw_results.csv
     $ python parse_traces.py --study correlated   # Phase 6 correlated_raw.csv
@@ -54,7 +61,8 @@ REGIME_ORDER = ("weak", "moderate", "strong", "iid", "tau100-20", "tau500-100",
                 "tau500-100-step50", "disjoint-iid-udp", "disjoint-tau500-udp",
                 "disjoint-tau500-tcp")
 POLICY_ORDER = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "bc", "bc-ppo",
-                "dqn-scratch", "dqn-bc", "ppo-transfer",
+                "dqn-scratch", "dqn-bc", "bc-route", "bc-ppo-route",
+                "dqn-scratch-route", "dqn-bc-route", "ppo-transfer",
                 "best-static", "static-0", "static-1", "static-2", "static-3",
                 "greedy-per", "random", "aodv")
 
@@ -69,8 +77,10 @@ SUMMARY_FIELDS = ("regime", "policy", "detail", "n_episodes",
 # Policies shown in the printed table and the plots; individual static
 # routes stay in summary.csv for reference.
 HEADLINE_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "bc",
-                     "bc-ppo", "dqn-scratch", "dqn-bc", "ppo-transfer",
-                     "best-static", "greedy-per", "random", "aodv")
+                     "bc-ppo", "dqn-scratch", "dqn-bc", "bc-route",
+                     "bc-ppo-route", "dqn-scratch-route", "dqn-bc-route",
+                     "ppo-transfer", "best-static", "greedy-per", "random",
+                     "aodv")
 
 
 def load_raw(path: str | Path) -> list[dict]:
@@ -431,7 +441,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--study", choices=("turbulence", "correlated",
                                             "adaptation", "imitation",
-                                            "offpolicy"),
+                                            "offpolicy", "routeaware"),
                         default="turbulence",
                         help="picks the default --raw/--out file pair")
     parser.add_argument("--raw", type=str, default=None,
@@ -448,13 +458,16 @@ def main() -> None:
              "correlated": ("correlated_raw", "correlated_summary"),
              "adaptation": ("adaptation_raw", "adaptation_summary"),
              "imitation": ("imitation_raw", "imitation_summary"),
-             "offpolicy": ("offpolicy_raw", "offpolicy_summary")}
+             "offpolicy": ("offpolicy_raw", "offpolicy_summary"),
+             "routeaware": ("routeaware_raw", "routeaware_summary")}
     stem, out_stem = stems[args.study]
     args.raw = args.raw or str(RESULTS_DIR / f"{stem}.csv")
     args.out = args.out or str(RESULTS_DIR / f"{out_stem}.csv")
 
     references = {"imitation": ("adaptation_raw",),
-                  "offpolicy": ("adaptation_raw", "imitation_raw")}
+                  "offpolicy": ("adaptation_raw", "imitation_raw"),
+                  "routeaware": ("adaptation_raw", "imitation_raw",
+                                 "offpolicy_raw")}
     rows = load_raw(args.raw)
     for reference in references.get(args.study, ()):
         reference_csv = RESULTS_DIR / f"{reference}.csv"
@@ -477,12 +490,32 @@ def main() -> None:
                 print(format_paired_policies(paired_policies(rows, policy, "bc"),
                                              policy, "bc"))
                 print()
+        elif args.study == "routeaware":
+            arms = ("bc-route", "bc-ppo-route", "dqn-scratch-route",
+                    "dqn-bc-route")
+            for policy in arms:
+                print(format_paired(paired_ppo_vs_best_static(rows, policy),
+                                    policy))
+                print()
+            # BC fidelity: the route-aware clone against its teacher
+            print(format_paired_policies(
+                paired_policies(rows, "bc-route", "greedy-per"),
+                "bc-route", "greedy-per"))
+            print()
+            # Observability deltas: each arm against its 28-dim counterpart
+            for policy, counterpart in zip(arms, ("bc", "bc-ppo",
+                                                  "dqn-scratch", "dqn-bc")):
+                print(format_paired_policies(
+                    paired_policies(rows, policy, counterpart),
+                    policy, counterpart))
+                print()
         else:
             print(format_paired(paired_ppo_vs_best_static(rows)))
         return
     summary = summarize(rows)
     policies = POLICY_ORDER if args.all_policies else HEADLINE_POLICIES
-    extended = args.study in ("adaptation", "imitation", "offpolicy")
+    extended = args.study in ("adaptation", "imitation", "offpolicy",
+                              "routeaware")
     print(format_table(summary, policies, extended=extended))
     write_summary(args.out, summary)
     print(f"\nwrote {args.out}")
