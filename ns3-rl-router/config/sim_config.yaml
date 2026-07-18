@@ -40,6 +40,10 @@ coherence_small: 0ms
 traffic_protocol: udp
 traffic_rate: 2Mbps
 
+# observation (route_in_obs appends a one-hot of the current route,
+# obs 28 -> 32; false keeps phases 5-9 reproducible)
+route_in_obs: false
+
 # reward weights
 reward_drop_weight: 1.0
 reward_delay_weight: 0.1

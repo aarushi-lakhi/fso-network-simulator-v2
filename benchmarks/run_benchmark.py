@@ -32,6 +32,19 @@ Three studies share this orchestrator:
   evaluates both greedy policies on the shared eval seeds into
   results/offpolicy_raw.csv. Baselines (ppo, statics, greedy-per, bc,
   bc-ppo) again come from the committed Phase 7/8 CSVs, not re-runs.
+* ``--study routeaware`` (Phase 10) re-runs the decisive Phase 8/9 arms
+  with the env's ``routeInObs`` flag on (a one-hot of the currently
+  held route joins the observation, 28 -> 32 dims), testing the
+  surviving hypothesis: every learned policy failed to express the
+  teacher's hysteresis because hold-vs-switch was unobservable. Per
+  cell: collect a route-aware teacher dataset (verifying the one-hot
+  matches the teacher's held route on every step), clone it
+  (``bc-route``), value-warmup + PPO fine-tune (``bc-ppo-route``,
+  Phase 8 protocol), and train Double DQN from scratch
+  (``dqn-scratch-route``) and from the fresh BC checkpoint
+  (``dqn-bc-route``, Phase 9 protocol); results go to
+  results/routeaware_raw.csv. The 28-dim counterparts and baselines
+  come from the committed Phase 7/8/9 CSVs, not re-runs.
 
 Policies compared per sweep point on the 5-node FSO mesh:
 
@@ -101,6 +114,7 @@ CORRELATED_RAW_CSV = RESULTS_DIR / "correlated_raw.csv"
 ADAPTATION_RAW_CSV = RESULTS_DIR / "adaptation_raw.csv"
 IMITATION_RAW_CSV = RESULTS_DIR / "imitation_raw.csv"
 OFFPOLICY_RAW_CSV = RESULTS_DIR / "offpolicy_raw.csv"
+ROUTEAWARE_RAW_CSV = RESULTS_DIR / "routeaware_raw.csv"
 CHECKPOINTS_DIR = RESULTS_DIR / "checkpoints"
 PHASE4_CHECKPOINT = _AGENT_DIR / "checkpoints" / "ns3_ppo.pt"
 DEFAULT_SIM_CONFIG = _REPO_DIR / "ns3-rl-router" / "config" / "sim_config.yaml"
@@ -129,7 +143,9 @@ POLICIES = ("ppo", "ppo-transfer", "static-0", "static-1", "static-2", "static-3
 # FRAME_STACK_K stacked observations (train and eval both wrap the env
 # in FlatFrameStack).
 ALL_POLICIES = ("ppo", "ppo-per", "ppo-per-ent", "ppo-stack", "greedy-per",
-                "bc", "bc-ppo", "dqn-scratch", "dqn-bc", *POLICIES[1:])
+                "bc", "bc-ppo", "dqn-scratch", "dqn-bc",
+                "bc-route", "bc-ppo-route", "dqn-scratch-route",
+                "dqn-bc-route", *POLICIES[1:])
 
 # Route tables (ROUTE_LINKS/DISJOINT_ROUTE_LINKS) and the greedy-per
 # hysteresis margin are imported from agent/teacher.py, the shared home
@@ -153,6 +169,9 @@ class CoherenceConfig:
             keeps the sim_config default (pentagon).
         traffic_protocol: Transport override of the 0->3 flow
             ("udp"/"tcp"); None keeps the sim_config default (udp).
+        route_in_obs: Route-aware observation override ("true"/"false",
+            Phase 10: a current-route one-hot joins the observation);
+            None keeps the sim_config default (false).
     """
 
     coherence_large: str
@@ -161,6 +180,7 @@ class CoherenceConfig:
     episode_steps: str | None = None
     topology: str | None = None
     traffic_protocol: str | None = None
+    route_in_obs: str | None = None
 
 
 # Phase 6 coherence sweep, all at strong turbulence (C2n = CORRELATED_C2N).
@@ -260,6 +280,26 @@ OFFPOLICY_TRAIN_STEPS = 80_000
 DQN_GAMMA = 0.99
 DQN_SCRATCH_EPS = ("1.0", "0.05", 40_000)
 DQN_BC_EPS = ("0.05", "0.01", 20_000)
+
+# Phase 10 route-aware study: the same two correlated cells with the
+# env's routeInObs flag on (obs 28 -> 32: a one-hot of the currently
+# held route). The four arms re-run the decisive Phase 8/9 protocols on
+# the widened observation — bc-route (clone the teacher; its hysteresis
+# state is now observable), bc-ppo-route (value warmup + PPO fine-tune,
+# Phase 8 budgets), dqn-scratch-route and dqn-bc-route (Double DQN,
+# Phase 9 epsilon schedules; the BC init comes from this study's fresh
+# 32-dim bc-route checkpoint). The dqn-bc-route Q-offset is derived
+# from the collected dataset's teacher episode rewards (the committed
+# Phase 9 recipe used the bc eval rows, which for the route-aware clone
+# do not exist before training; the teacher's reward is the scale the
+# clone is expected to land on).
+ROUTEAWARE_CONFIGS: dict[str, CoherenceConfig] = {
+    name: CoherenceConfig(**{**asdict(config), "route_in_obs": "true"})
+    for name, config in IMITATION_CONFIGS.items()
+}
+ROUTEAWARE_POLICIES = ("bc-route", "bc-ppo-route", "dqn-scratch-route",
+                       "dqn-bc-route")
+ROUTEAWARE_TRAIN_STEPS = 80_000
 
 CSV_FIELDS = ("regime", "c2n", "policy", "episode", "sim_seed", "reward",
               "drops", "tx_pkts", "rx_pkts", "pdr", "mean_delay_ms",
@@ -498,7 +538,8 @@ def eval_worker(args: argparse.Namespace) -> None:
                        step_time_s=args.step_time,
                        episode_steps=args.episode_steps,
                        topology=args.topology,
-                       traffic_protocol=args.traffic_protocol)
+                       traffic_protocol=args.traffic_protocol,
+                       route_in_obs=args.route_in_obs)
     route_links = (DISJOINT_ROUTE_LINKS if args.topology == "disjoint"
                    else ROUTE_LINKS)
     stacked_env = None
@@ -559,6 +600,8 @@ def _coherence_cli_args(coherence: CoherenceConfig | None,
         args += ["--topology", coherence.topology]
     if coherence.traffic_protocol is not None:
         args += ["--traffic-protocol", coherence.traffic_protocol]
+    if coherence.route_in_obs is not None:
+        args += ["--route-in-obs", coherence.route_in_obs]
     return args
 
 
@@ -779,6 +822,132 @@ def run_offpolicy_pipeline(regime: str, c2n: str, coherence: CoherenceConfig,
         print("\n".join(out.splitlines()[-2:]), flush=True)
 
 
+def dataset_q_offset(dataset: Path, episode_steps: int,
+                     gamma: float = DQN_GAMMA) -> float:
+    """Return-scale Q-value offset from a collected teacher dataset.
+
+    The route-aware analogue of :func:`bc_q_offset`: the fresh 32-dim
+    BC clone has no committed eval rows before training, so the offset
+    comes from the teacher episode rewards stored in the BC dataset —
+    the reward scale the clone is expected to land on. Any constant is
+    argmax-invariant; only the order of magnitude matters.
+
+    Args:
+        dataset: BC dataset (.npz with an ``episode_rewards`` array).
+        episode_steps: Decision steps per episode of the cell.
+        gamma: Discount factor of the DQN.
+
+    Returns:
+        Mean teacher step reward / (1 - gamma).
+    """
+    rewards = np.load(dataset)["episode_rewards"]
+    return float(np.mean(rewards) / episode_steps / (1.0 - gamma))
+
+
+def run_routeaware_pipeline(regime: str, c2n: str, coherence: CoherenceConfig,
+                            args: argparse.Namespace) -> None:
+    """Train the four route-aware arms of one cell (Phase 10).
+
+    Repeats the Phase 8 imitation pipeline (collect / bc / value-warmup
+    + PPO fine-tune) and the Phase 9 DQN arms with the env's routeInObs
+    flag on, so every stage sees the 32-dim observation. The collect
+    stage verifies on every step that the observation's route one-hot
+    equals the teacher's held route. Each stage runs in its own
+    subprocess; existing artifacts are reused unless --retrain.
+
+    Args:
+        regime: Cell name (a ROUTEAWARE_CONFIGS key).
+        c2n: Turbulence strength of the cell.
+        coherence: Env sweep point of the cell (route_in_obs="true").
+        args: Orchestrator CLI namespace (quick/retrain/train knobs).
+    """
+    CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
+    imitation_py = str(_AGENT_DIR / "imitation.py")
+    dqn_py = str(_AGENT_DIR / "dqn.py")
+    dataset = CHECKPOINTS_DIR / f"bc_dataset_route_{regime}.npz"
+    bc_ckpt = CHECKPOINTS_DIR / f"bc_route_{regime}.pt"
+    bc_ppo_ckpt = CHECKPOINTS_DIR / f"bc_ppo_route_{regime}.pt"
+    env_args = ["--c2n", c2n, *_coherence_cli_args(coherence)]
+
+    if args.retrain or not dataset.exists():
+        episodes = 2 if args.quick else BC_DATASET_EPISODES
+        print(f"[{regime}] collecting {episodes} route-aware teacher episodes "
+              f"...", flush=True)
+        out = _run_agent_stage(
+            [sys.executable, imitation_py, "collect", "--out", str(dataset),
+             "--episodes", str(episodes), "--seed", str(args.train_seed),
+             *env_args],
+            f"{regime} collect")
+        print("\n".join(line for line in out.splitlines()
+                        if line.startswith(("[collect] wrote",
+                                            "[collect] teacher",
+                                            "[collect] route-onehot"))),
+              flush=True)
+    else:
+        print(f"[{regime}] reusing dataset {dataset}")
+
+    if args.retrain or not bc_ckpt.exists():
+        epochs = 5 if args.quick else BC_EPOCHS
+        print(f"[{regime}] behavior cloning ({epochs} epochs) ...", flush=True)
+        out = _run_agent_stage(
+            [sys.executable, imitation_py, "bc", "--dataset", str(dataset),
+             "--checkpoint", str(bc_ckpt), "--epochs", str(epochs),
+             "--metrics-csv", str(RESULTS_DIR / f"routeaware_bc_{regime}.csv")],
+            f"{regime} bc")
+        print("\n".join(line for line in out.splitlines()
+                        if line.startswith("[bc]")), flush=True)
+    else:
+        print(f"[{regime}] reusing BC checkpoint {bc_ckpt}")
+
+    total = 1000 if args.quick else (args.train_steps or ROUTEAWARE_TRAIN_STEPS)
+    if args.retrain or not bc_ppo_ckpt.exists():
+        warmup = 500 if args.quick else BC_WARMUP_STEPS
+        print(f"[{regime}] value warmup ({warmup}) + PPO fine-tune ({total}) "
+              f"...", flush=True)
+        out = _run_agent_stage(
+            [sys.executable, imitation_py, "finetune",
+             "--bc-checkpoint", str(bc_ckpt),
+             "--checkpoint", str(bc_ppo_ckpt),
+             "--trajectory-csv",
+             str(RESULTS_DIR / f"routeaware_trajectory_bc-ppo-route_{regime}.csv"),
+             "--rewards-csv",
+             str(RESULTS_DIR / f"routeaware_rewards_bc-ppo-route_{regime}.csv"),
+             "--warmup-steps", str(warmup), "--total-steps", str(total),
+             "--rollout-steps", "500", "--seed", str(args.train_seed),
+             *env_args],
+            f"{regime} finetune")
+        print("\n".join(out.splitlines()[-2:]), flush=True)
+    else:
+        print(f"[{regime}] reusing fine-tuned checkpoint {bc_ppo_ckpt}")
+
+    scale = total / ROUTEAWARE_TRAIN_STEPS
+    for arm in ("dqn-scratch-route", "dqn-bc-route"):
+        checkpoint = CHECKPOINTS_DIR / f"{arm.replace('-', '_')}_{regime}.pt"
+        if not args.retrain and checkpoint.exists():
+            print(f"[{regime}] reusing checkpoint {checkpoint}")
+            continue
+        eps_start, eps_end, eps_decay = (DQN_BC_EPS if arm == "dqn-bc-route"
+                                         else DQN_SCRATCH_EPS)
+        cmd = [sys.executable, dqn_py, "train",
+               "--checkpoint", str(checkpoint),
+               "--trajectory-csv",
+               str(RESULTS_DIR / f"routeaware_trajectory_{arm}_{regime}.csv"),
+               "--rewards-csv",
+               str(RESULTS_DIR / f"routeaware_rewards_{arm}_{regime}.csv"),
+               "--total-steps", str(total),
+               "--eps-start", eps_start, "--eps-end", eps_end,
+               "--eps-decay-steps", str(max(1, int(eps_decay * scale))),
+               "--seed", str(args.train_seed), *env_args]
+        if arm == "dqn-bc-route":
+            steps = int(coherence.episode_steps or "200")
+            cmd += ["--bc-checkpoint", str(bc_ckpt),
+                    "--q-offset", f"{dataset_q_offset(dataset, steps):.6g}"]
+        print(f"[{regime}] training {arm} for {total} steps "
+              f"(eps {eps_start} -> {eps_end}) ...", flush=True)
+        out = _run_agent_stage(cmd, f"{regime} {arm}")
+        print("\n".join(out.splitlines()[-2:]), flush=True)
+
+
 def eval_env_policies(regime: str, policies: list[str], episodes: int,
                       seed: int, sim_config: str, c2n: str | None = None,
                       coherence: CoherenceConfig | None = None) -> list[EpisodeRow]:
@@ -898,13 +1067,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--study", choices=("turbulence", "correlated",
                                             "adaptation", "imitation",
-                                            "offpolicy"),
+                                            "offpolicy", "routeaware"),
                         default="turbulence",
                         help="turbulence: Phase 5 C2n sweep (default); "
                              "correlated: Phase 6 coherence-time sweep; "
                              "adaptation: Phase 7 disjoint-topology study; "
                              "imitation: Phase 8 imitation-then-RL study; "
-                             "offpolicy: Phase 9 Double DQN study")
+                             "offpolicy: Phase 9 Double DQN study; "
+                             "routeaware: Phase 10 route-in-observation study")
     parser.add_argument("--regime", action="append",
                         choices=(sorted(REGIMES) + sorted(COHERENCE_CONFIGS)
                                  + sorted(ADAPTATION_CONFIGS)),
@@ -947,6 +1117,8 @@ def parse_args() -> argparse.Namespace:
                         help=argparse.SUPPRESS)
     parser.add_argument("--traffic-protocol", type=str, default=None,
                         dest="traffic_protocol", help=argparse.SUPPRESS)
+    parser.add_argument("--route-in-obs", type=str, default=None,
+                        dest="route_in_obs", help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -961,7 +1133,15 @@ def main() -> None:
     adaptation = args.study == "adaptation"
     imitation = args.study == "imitation"
     offpolicy = args.study == "offpolicy"
-    if offpolicy:
+    routeaware = args.study == "routeaware"
+    if routeaware:
+        selected = args.regime or list(ROUTEAWARE_CONFIGS)
+        cells = [(name, CORRELATED_C2N, ROUTEAWARE_CONFIGS[name])
+                 for name in ROUTEAWARE_CONFIGS if name in selected]
+        base_policies = ROUTEAWARE_POLICIES
+        raw_csv = ROUTEAWARE_RAW_CSV
+        train_steps = {}
+    elif offpolicy:
         selected = args.regime or list(OFFPOLICY_CONFIGS)
         cells = [(name, CORRELATED_C2N, OFFPOLICY_CONFIGS[name])
                  for name in OFFPOLICY_CONFIGS if name in selected]
@@ -1032,7 +1212,12 @@ def main() -> None:
             run_offpolicy_pipeline(regime, c2n, coherence, args)
             timings.append((regime, "offpolicy-pipeline",
                             time.monotonic() - start))
-        train_variants = [] if (imitation or offpolicy) else [
+        if routeaware:
+            start = time.monotonic()
+            run_routeaware_pipeline(regime, c2n, coherence, args)
+            timings.append((regime, "routeaware-pipeline",
+                            time.monotonic() - start))
+        train_variants = [] if (imitation or offpolicy or routeaware) else [
             p for p in cell_policies
             if p.startswith("ppo") and p != "ppo-transfer"]
         for variant in train_variants:
